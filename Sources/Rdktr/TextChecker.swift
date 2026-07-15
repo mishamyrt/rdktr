@@ -4,6 +4,8 @@ import Foundation
 /// A stop-word rule from the compiled rule set.
 public struct Rule: Sendable, Hashable {
     public let id: Int
+    /// Language of the rule set the rule belongs to, e.g. "ru" or "en".
+    public let language: String
     public let title: String
     public let hint: String
     public let weight: Int
@@ -17,21 +19,43 @@ public struct Issue: Sendable {
 
 /// Text-cleanliness checker backed by the C engine.
 ///
-/// The engine is immutable after creation and safe to share for reading,
+/// `TextChecker()` checks every embedded language and picks the language
+/// per paragraph automatically (Cyrillic vs Latin script, with a fallback
+/// to the document-dominant script). `TextChecker(language:)` pins one
+/// language and skips detection.
+///
+/// The checker is immutable after creation and safe to share for reading,
 /// but `check` allocates per call, so one instance per thread is cheapest.
 public final class TextChecker {
-    private let engine: OpaquePointer
+    private enum Backend {
+        case single(OpaquePointer)
+        case multi(OpaquePointer)
+    }
+
+    private let backend: Backend
     private let externalBlob: UnsafeMutableRawBufferPointer?
     public let rules: [Rule]
 
-    /// Creates a checker with the rule set embedded at build time.
-    public convenience init?() {
-        guard let engine = rdktr_create_default() else { return nil }
-        self.init(engine: engine, blob: nil)
+    /// Languages embedded into the library at build time (e.g. ["en", "ru"]).
+    public static var embeddedLanguages: [String] {
+        (0..<rdktr_embedded_count()).compactMap {
+            rdktr_embedded_lang($0).map { String(cString: $0) }
+        }
     }
 
-    /// Creates a checker from an externally compiled rules blob
-    /// (produced by `Scripts/compile_rules.py --out-bin`).
+    /// All embedded languages, automatic per-paragraph detection.
+    public convenience init?() {
+        guard let multi = rdktr_multi_create_default() else { return nil }
+        self.init(backend: .multi(multi), blob: nil)
+    }
+
+    /// One embedded language, no detection (e.g. `TextChecker(language: "ru")`).
+    public convenience init?(language: String) {
+        guard let engine = rdktr_create_embedded(language) else { return nil }
+        self.init(backend: .single(engine), blob: nil)
+    }
+
+    /// A single custom rules blob (produced by `compile_rules.py --out-bin-dir`).
     public convenience init?(blob: Data) {
         let buffer = UnsafeMutableRawBufferPointer.allocate(
             byteCount: blob.count,
@@ -42,25 +66,51 @@ public final class TextChecker {
             buffer.deallocate()
             return nil
         }
-        self.init(engine: engine, blob: buffer)
+        self.init(backend: .single(engine), blob: buffer)
     }
 
-    private init(engine: OpaquePointer, blob: UnsafeMutableRawBufferPointer?) {
-        self.engine = engine
+    private init(backend: Backend, blob: UnsafeMutableRawBufferPointer?) {
+        self.backend = backend
         self.externalBlob = blob
-        self.rules = (0..<rdktr_rule_count(engine)).map { id in
-            Rule(
-                id: Int(id),
-                title: rdktr_rule_title(engine, id).map { String(cString: $0) } ?? "",
-                hint: rdktr_rule_description(engine, id).map { String(cString: $0) } ?? "",
-                weight: Int(rdktr_rule_weight(engine, id))
-            )
+        switch backend {
+        case .single(let engine):
+            let lang = rdktr_lang(engine).map { String(cString: $0) } ?? ""
+            self.rules = (0..<rdktr_rule_count(engine)).map { id in
+                Rule(
+                    id: Int(id),
+                    language: lang,
+                    title: rdktr_rule_title(engine, id).map { String(cString: $0) } ?? "",
+                    hint: rdktr_rule_description(engine, id).map { String(cString: $0) } ?? "",
+                    weight: Int(rdktr_rule_weight(engine, id))
+                )
+            }
+        case .multi(let multi):
+            self.rules = (0..<rdktr_multi_rule_count(multi)).map { id in
+                Rule(
+                    id: Int(id),
+                    language: rdktr_multi_rule_lang(multi, id).map { String(cString: $0) } ?? "",
+                    title: rdktr_multi_rule_title(multi, id).map { String(cString: $0) } ?? "",
+                    hint: rdktr_multi_rule_description(multi, id).map { String(cString: $0) } ?? "",
+                    weight: Int(rdktr_multi_rule_weight(multi, id))
+                )
+            }
         }
     }
 
     deinit {
-        rdktr_destroy(engine)
+        switch backend {
+        case .single(let engine): rdktr_destroy(engine)
+        case .multi(let multi): rdktr_multi_destroy(multi)
+        }
         externalBlob?.deallocate()
+    }
+
+    private func rawCheck(_ base: UnsafePointer<CChar>, _ len: Int,
+                          _ out: UnsafeMutablePointer<rdktr_match>?, _ cap: Int) -> Int {
+        switch backend {
+        case .single(let engine): return rdktr_check(engine, base, len, out, cap)
+        case .multi(let multi): return rdktr_multi_check(multi, base, len, out, cap)
+        }
     }
 
     /// Checks the text and returns all findings sorted by position.
@@ -70,11 +120,11 @@ public final class TextChecker {
 
         let matches: [rdktr_match] = utf8.withUnsafeMutableBufferPointer { buf in
             let base = UnsafeRawPointer(buf.baseAddress!).assumingMemoryBound(to: CChar.self)
-            let total = rdktr_check(engine, base, buf.count, nil, 0)
+            let total = rawCheck(base, buf.count, nil, 0)
             guard total > 0 else { return [] }
             var out = [rdktr_match](repeating: rdktr_match(), count: total)
             let written = out.withUnsafeMutableBufferPointer {
-                rdktr_check(engine, base, buf.count, $0.baseAddress, total)
+                rawCheck(base, buf.count, $0.baseAddress, total)
             }
             precondition(written == total, "engine returned inconsistent match count")
             return out

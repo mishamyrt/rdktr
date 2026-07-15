@@ -2,18 +2,19 @@
 """rdktr rules compiler.
 
 Reads rule files (Rules/<lang>/*.md), expands morphology markers and builds
-a binary blob with a double-array trie (pattern words) and a phrase
-automaton (Aho-Corasick over word ids). The blob is embedded into the C
-library as a generated source file.
+one binary blob per language, each with a double-array trie (pattern words)
+and a phrase automaton (Aho-Corasick over word ids). The blobs are embedded
+into the C library as a generated source file.
 
 Pattern line syntax:
     слово или фраза      exact match (case-insensitive, ё == е)
-    ~слово               expand to all inflected forms of the lexeme (pymorphy3)
+    ~слово               expand to all inflected forms of the lexeme
+                         (pymorphy3; Russian rules only)
     основ*               prefix match: any word starting with "основ"
     *, *, *, *, *, *     special structural rule: too many commas in a sentence
 
 Usage:
-    python3 compile_rules.py [--rules DIR] [--out-c FILE] [--out-bin FILE]
+    python3 compile_rules.py [--rules DIR] [--out-c FILE] [--out-bin-dir DIR]
 """
 
 import argparse
@@ -23,9 +24,9 @@ import sys
 from pathlib import Path
 
 NONE = 0xFFFFFFFF
-HEADER_SIZE = 100
+HEADER_SIZE = 104
 MAGIC = b"RDK1"
-VERSION = 1
+VERSION = 2
 
 COMMA_RULE_RE = re.compile(r"^\*(\s*,\s*\*)+$")
 
@@ -51,11 +52,44 @@ def is_word_char(ch: str) -> bool:
     o = ord(ch)
     if o < 0x80:
         return ("a" <= ch <= "z") or ("0" <= ch <= "9") or ch in "-'"
+    if o == 0x2019:  # ’ typographic apostrophe (connector)
+        return True
     if 0x400 <= o <= 0x4FF:
         return True
     if 0xC0 <= o <= 0x24F and o not in (0xD7, 0xF7):
         return True
     return False
+
+
+def word_variants(word: str):
+    """don't / don’t are different byte sequences; index both."""
+    if "'" in word:
+        return [word, word.replace("'", "’")]
+    if "’" in word:
+        return [word.replace("’", "'"), word]
+    return [word]
+
+
+def apostrophe_star_variants(word: str, ctx: str):
+    """Mid-word '*' marks an optional apostrophe:
+    don*t -> dont, don't, don’t."""
+    if "*" not in word:
+        return word_variants(word)
+    from itertools import product
+
+    parts = word.split("*")
+    if any(p == "" for p in parts):
+        raise SystemExit(
+            f"{ctx}: '*' inside a word marks an optional apostrophe and"
+            f" cannot start or end the word: {word!r}"
+        )
+    out = []
+    for seps in product(["", "'", "’"], repeat=len(parts) - 1):
+        w = parts[0]
+        for sep, part in zip(seps, parts[1:]):
+            w = w + sep + part
+        out.append(w)
+    return out
 
 
 # --- Rule file parsing -------------------------------------------------------
@@ -234,7 +268,10 @@ class PhraseAutomaton:
 
 
 class Compiler:
-    def __init__(self, morph):
+    def __init__(self, lang: str, morph=None):
+        if not (1 <= len(lang) <= 3) or not lang.isascii() or not lang.isalpha():
+            raise SystemExit(f"language code must be 1-3 ASCII letters, got {lang!r}")
+        self.lang = lang.lower()
         self.morph = morph
         self.rules = []  # {title, description, weight}
         self.word_ids = {}  # word -> id
@@ -270,20 +307,28 @@ class Compiler:
             raise SystemExit(f"{ctx}: word cannot start/end with a connector: {word!r}")
 
     def add_seq(self, words, rule_id, ctx):
-        ids = []
+        from itertools import product
+
         for w in words:
             self._validate_word(w, ctx)
-            ids.append(self.word_id(w))
-        pid = self._pattern(("seq", tuple(ids)))
-        self.patterns[pid].add(rule_id)
-        self.seq_patterns[tuple(ids)] = pid
+        for combo in product(*(word_variants(w) for w in words)):
+            ids = tuple(self.word_id(w) for w in combo)
+            pid = self._pattern(("seq", ids))
+            self.patterns[pid].add(rule_id)
+            self.seq_patterns[ids] = pid
 
     def add_prefix(self, prefix, rule_id, ctx):
         self._validate_word(prefix, ctx)
-        pid = self._pattern(("prefix", prefix))
-        self.patterns[pid].add(rule_id)
+        for variant in word_variants(prefix):
+            pid = self._pattern(("prefix", variant))
+            self.patterns[pid].add(rule_id)
 
     def expand_lexeme(self, word: str, ctx: str):
+        if self.morph is None:
+            raise SystemExit(
+                f"{ctx}: '~' morphology expansion is only available for Russian"
+                " rules (pymorphy3); use a prefix pattern (word*) instead"
+            )
         parses = self.morph.parse(word)
         if not parses:
             raise SystemExit(f"{ctx}: pymorphy3 cannot parse {word!r}")
@@ -303,6 +348,8 @@ class Compiler:
         self.rules.append(
             {"title": title, "description": description, "weight": weight}
         )
+        from itertools import product
+
         for n, raw in enumerate(lines, 1):
             ctx = f"{path}:{n}"
             line = raw.strip()
@@ -310,25 +357,55 @@ class Compiler:
                 self.comma_rule_id = rule_id
                 self.comma_threshold = line.count(",")
                 continue
-            if line.startswith("~"):
-                word = normalize(line[1:].strip())
-                if " " in word:
-                    raise SystemExit(
-                        f"{ctx}: '~' expansion works for single words only"
+
+            words_raw = line.split()
+
+            # single-word prefix patterns go into the trie as prefix terminals
+            if len(words_raw) == 1 and words_raw[0].endswith("*"):
+                w = words_raw[0]
+                if w.startswith("~"):
+                    # combined markers: the prefix already covers every
+                    # inflected form, so compile it as a plain prefix
+                    print(
+                        f"note: {ctx}: {line!r} compiled as prefix {w[1:]!r}",
+                        file=sys.stderr,
                     )
-                forms = self.expand_lexeme(word, ctx)
-                self.form_count += len(forms)
-                for form in forms:
-                    self.add_seq([form], rule_id, ctx)
+                    w = w[1:]
+                for stem in apostrophe_star_variants(normalize(w[:-1]), ctx):
+                    self.add_prefix(stem, rule_id, ctx)
                 continue
-            if line.endswith("*"):
-                prefix = normalize(line[:-1].strip())
-                if " " in prefix:
-                    raise SystemExit(f"{ctx}: prefix patterns must be a single word")
-                self.add_prefix(prefix, rule_id, ctx)
-                continue
-            words = [normalize(w) for w in line.split()]
-            self.add_seq(words, rule_id, ctx)
+
+            # words and phrases; each word may carry a ~ marker, which
+            # expands to every inflected form (cartesian product for phrases)
+            variant_lists = []
+            for w in words_raw:
+                if w.endswith("*"):
+                    raise SystemExit(
+                        f"{ctx}: prefix inside a phrase is not supported;"
+                        f" use '~лемма' to match all forms: {line!r}"
+                    )
+                if w.startswith("~"):
+                    if "*" in w:
+                        raise SystemExit(
+                            f"{ctx}: markers '~' and '*' cannot be combined"
+                            f" inside a word: {w!r}"
+                        )
+                    forms = self.expand_lexeme(normalize(w[1:]), ctx)
+                    self.form_count += len(forms)
+                    variant_lists.append(forms)
+                else:
+                    variant_lists.append(
+                        apostrophe_star_variants(normalize(w), ctx)
+                    )
+            combos = 1
+            for vl in variant_lists:
+                combos *= len(vl)
+            if combos > 4096:
+                raise SystemExit(
+                    f"{ctx}: too many form combinations ({combos}) in {line!r}"
+                )
+            for combo in product(*variant_lists):
+                self.add_seq(list(combo), rule_id, ctx)
 
     # --- serialization -------------------------------------------------------
 
@@ -430,7 +507,7 @@ class Compiler:
         align4(body)
 
         header = struct.pack(
-            "<4sIIIIIIIIIIIIIIIIIIIIIIII",
+            "<4sIIIIIIIIIIIIIIIIIIIIIIII4s",
             MAGIC,
             VERSION,
             len(body),
@@ -456,6 +533,7 @@ class Compiler:
             max_len,
             self.comma_rule_id,
             self.comma_threshold,
+            self.lang.encode("ascii").ljust(4, b"\0"),
         )
         assert len(header) == HEADER_SIZE, len(header)
         body[:HEADER_SIZE] = header
@@ -472,59 +550,87 @@ class Compiler:
         return bytes(body)
 
 
-C_TEMPLATE = """\
+C_HEADER = """\
 /* Generated by Scripts/compile_rules.py — do not edit by hand.
  * Regenerate with: python3 Scripts/compile_rules.py
  */
-#include <stddef.h>
-#include <stdint.h>
+#include "rdktr_internal.h"
+"""
 
-_Alignas(4) const uint8_t rdktr_default_rules_data[] = {{
-{rows}
+C_FOOTER = """\
+const rdktr_embedded_ruleset rdktr_embedded_rulesets[] = {{
+{entries}
 }};
 
-const size_t rdktr_default_rules_size = sizeof(rdktr_default_rules_data);
+const size_t rdktr_embedded_ruleset_count = {count};
 """
 
 
-def emit_c(blob: bytes, path: Path):
-    rows = []
-    for i in range(0, len(blob), 16):
-        chunk = blob[i : i + 16]
-        rows.append("    " + ", ".join(f"0x{b:02x}" for b in chunk) + ",")
-    path.write_text(C_TEMPLATE.format(rows="\n".join(rows)), encoding="utf-8")
+def emit_c(blobs, path: Path):
+    """blobs: list of (lang, bytes)."""
+    parts = [C_HEADER]
+    for lang, blob in blobs:
+        rows = []
+        for i in range(0, len(blob), 16):
+            chunk = blob[i : i + 16]
+            rows.append("    " + ", ".join(f"0x{b:02x}" for b in chunk) + ",")
+        parts.append(
+            f"\n_Alignas(4) static const uint8_t rules_{lang}[] = {{\n"
+            + "\n".join(rows)
+            + "\n};\n"
+        )
+    entries = "\n".join(
+        f'    {{"{lang}", rules_{lang}, sizeof(rules_{lang})}},' for lang, _ in blobs
+    )
+    parts.append("\n" + C_FOOTER.format(entries=entries, count=len(blobs)))
+    path.write_text("".join(parts), encoding="utf-8")
 
 
 def main():
     root = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--rules", default=str(root / "Rules" / "ru"))
+    ap.add_argument("--rules", default=str(root / "Rules"),
+                    help="directory with per-language subdirectories")
     ap.add_argument("--out-c", default=str(root / "Sources" / "CRdktr" / "rules_data.c"))
-    ap.add_argument("--out-bin", default=None, help="optionally also write raw blob")
+    ap.add_argument("--out-bin-dir", default=None,
+                    help="optionally also write rules_<lang>.bin files here")
     args = ap.parse_args()
 
-    try:
-        import pymorphy3
-    except ImportError:
-        raise SystemExit(
-            "pymorphy3 is required: pip install -r Scripts/requirements.txt"
-        )
-    morph = pymorphy3.MorphAnalyzer()
+    lang_dirs = sorted(
+        d for d in Path(args.rules).iterdir() if d.is_dir() and list(d.glob("*.md"))
+    )
+    if not lang_dirs:
+        raise SystemExit(f"no language directories with rules found in {args.rules}")
 
-    comp = Compiler(morph)
-    files = sorted(Path(args.rules).glob("*.md"))
-    if not files:
-        raise SystemExit(f"no rule files found in {args.rules}")
-    for f in files:
-        comp.add_rule_file(f)
+    morph = None
+    blobs = []
+    for lang_dir in lang_dirs:
+        lang = lang_dir.name
+        if lang == "ru" and morph is None:
+            try:
+                import pymorphy3
+            except ImportError:
+                raise SystemExit(
+                    "pymorphy3 is required: pip install -r Scripts/requirements.txt"
+                )
+            morph = pymorphy3.MorphAnalyzer()
 
-    blob = comp.build_blob()
-    emit_c(blob, Path(args.out_c))
-    if args.out_bin:
-        Path(args.out_bin).write_bytes(blob)
+        comp = Compiler(lang, morph if lang == "ru" else None)
+        for f in sorted(lang_dir.glob("*.md")):
+            comp.add_rule_file(f)
+        blob = comp.build_blob()
+        blobs.append((lang, blob))
 
-    for k, v in comp.stats.items():
-        print(f"{k:>16}: {v}")
+        print(f"[{lang}]")
+        for k, v in comp.stats.items():
+            print(f"{k:>16}: {v}")
+        if args.out_bin_dir:
+            out = Path(args.out_bin_dir) / f"rules_{lang}.bin"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(blob)
+            print(f"{'bin':>16}: {out}")
+
+    emit_c(blobs, Path(args.out_c))
     print(f"{'output':>16}: {args.out_c}")
 
 

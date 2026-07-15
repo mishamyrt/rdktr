@@ -61,7 +61,7 @@ final class RdktrTests: XCTestCase {
         XCTAssertEqual(titles("данного"), ["Канцеляризм"])
         XCTAssertEqual(titles("данным"), ["Канцеляризм"])
         XCTAssertEqual(titles("в данных обстоятельствах"), ["Канцеляризм"])
-        XCTAssertEqual(titles("нет возможностей"), ["Рекламный штамп"]) // фичеризм.md title
+        XCTAssertEqual(titles("нет возможностей"), ["Фичеризм"])
         XCTAssertEqual(titles("существовали"), ["Слабый глагол"])
     }
 
@@ -132,11 +132,74 @@ final class RdktrTests: XCTestCase {
     }
 
     func testRuleMetadata() {
-        XCTAssertEqual(checker.rules.count, 18)
+        XCTAssertEqual(TextChecker.embeddedLanguages, ["en", "ru"])
+        XCTAssertEqual(checker.rules.filter { $0.language == "ru" }.count, 18)
+        XCTAssertEqual(checker.rules.filter { $0.language == "en" }.count, 9)
         let kanc = checker.rules.first { $0.title == "Канцеляризм" }
         XCTAssertNotNil(kanc)
         XCTAssertEqual(kanc?.weight, 100)
+        XCTAssertEqual(kanc?.language, "ru")
         XCTAssertFalse(kanc!.hint.isEmpty)
+    }
+
+    // MARK: multilingual checking
+
+    func testEnglishBasics() {
+        let found = Set(titles("This is a very robust solution"))
+        XCTAssertTrue(found.contains("Intensifier"))
+        XCTAssertTrue(found.contains("Corporate cliché"))
+    }
+
+    func testEnglishPrefix() {
+        XCTAssertEqual(titles("we utilized the API"), ["Officialese"])
+        XCTAssertEqual(titles("keep leveraging synergies"), ["Corporate cliché", "Corporate cliché"])
+    }
+
+    func testEnglishApostropheVariants() {
+        // the rule is written as "don*t miss out": mid-word * makes the
+        // apostrophe optional in any form
+        XCTAssertEqual(titles("don't miss out"), ["Marketing hype"])
+        XCTAssertEqual(titles("don’t miss out"), ["Marketing hype"]) // typographic ’
+        XCTAssertEqual(titles("dont miss out"), ["Marketing hype"]) // no apostrophe
+    }
+
+    func testMixedDocumentChecksEachParagraphInItsLanguage() {
+        let text = "Данный подход работает.\n\nThis is a very good approach."
+        let issues = checker.check(text)
+        XCTAssertEqual(issues.count, 2)
+        XCTAssertEqual(String(text[issues[0].range]), "Данный")
+        XCTAssertEqual(issues[0].rule.language, "ru")
+        XCTAssertEqual(String(text[issues[1].range]), "very")
+        XCTAssertEqual(issues[1].rule.language, "en")
+    }
+
+    func testForeignWordInsideParagraphIsNotChecked() {
+        // the paragraph is Cyrillic-dominant, so only Russian rules apply
+        XCTAssertEqual(titles("Мы сделали это very аккуратно и очень быстро"),
+                       ["Личное местоимение", "Усилители"])
+    }
+
+    func testAmbiguousParagraphFallsBackToDocumentLanguage() {
+        // second paragraph has 2 Cyrillic and 2 Latin letters (a tie);
+        // the document is Cyrillic-dominant, so it is checked as Russian
+        let text = "Данный текст написан по-русски.\n\nвы ok"
+        let found = titles(text)
+        XCTAssertTrue(found.contains("Личное местоимение"))
+    }
+
+    func testFixedLanguageChecker() {
+        let en = TextChecker(language: "en")
+        XCTAssertNotNil(en)
+        XCTAssertEqual(en!.rules.count, 9)
+        // no detection: English rules apply regardless of surrounding script
+        XCTAssertEqual(en!.check("очень very").map { $0.rule.title }, ["Intensifier"])
+        XCTAssertNil(TextChecker(language: "de"))
+    }
+
+    func testPhraseMorphologyExpansion() {
+        // "~принимать участие" / "~принять участие" expand inside the phrase
+        XCTAssertEqual(titles("они принимали участие"), ["Газетный штамп"])
+        XCTAssertEqual(titles("он примет участие"), ["Газетный штамп"])
     }
 
     func testEmptyAndDegenerateInput() {

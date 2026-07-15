@@ -57,7 +57,9 @@ static int is_word_core(uint32_t cp) {
     return 0;
 }
 
-static int is_connector(uint32_t cp) { return cp == '-' || cp == '\''; }
+static int is_connector(uint32_t cp) {
+    return cp == '-' || cp == '\'' || cp == 0x2019 /* ’ */;
+}
 
 static int is_space_cp(uint32_t cp) {
     switch (cp) {
@@ -171,8 +173,9 @@ static size_t filter_contained(rdktr_match *v, size_t n) {
 
 /* ---- main scan --------------------------------------------------------------- */
 
-size_t rdktr_check(const rdktr_engine *e, const char *utf8, size_t len,
-                   rdktr_match *out, size_t cap) {
+size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
+                         rdktr_match **out_matches) {
+    *out_matches = NULL;
     if (!e || (!utf8 && len > 0)) return 0;
 
     match_vec words = {0};  /* word/phrase matches (filtered for containment) */
@@ -182,14 +185,14 @@ size_t rdktr_check(const rdktr_engine *e, const char *utf8, size_t len,
 
     if (len > 0) {
         norm = (uint8_t *)malloc(len);
-        if (!norm) return 0;
+        if (!norm) return SIZE_MAX;
         rdktr_normalize_utf8((const uint8_t *)utf8, norm, len);
     }
     uint32_t ring_cap = e->max_phrase_len;
     ring = (uint32_t *)malloc((size_t)ring_cap * sizeof(uint32_t));
     if (!ring) {
         free(norm);
-        return 0;
+        return SIZE_MAX;
     }
 
     uint32_t ac_state = 0;
@@ -311,7 +314,7 @@ size_t rdktr_check(const rdktr_engine *e, const char *utf8, size_t len,
     if (words.oom || extra.oom) {
         free(words.v);
         free(extra.v);
-        return 0;
+        return SIZE_MAX;
     }
 
     words.n = filter_contained(words.v, words.n);
@@ -322,15 +325,23 @@ size_t rdktr_check(const rdktr_engine *e, const char *utf8, size_t len,
     free(extra.v);
     if (words.oom) {
         free(words.v);
-        return 0;
+        return SIZE_MAX;
     }
     if (extra.n > 0) qsort(words.v, words.n, sizeof(rdktr_match), match_cmp);
 
-    size_t n = words.n;
-    if (out && cap > 0) {
+    *out_matches = words.v;
+    return words.n;
+}
+
+size_t rdktr_check(const rdktr_engine *e, const char *utf8, size_t len,
+                   rdktr_match *out, size_t cap) {
+    rdktr_match *matches;
+    size_t n = rdktr_check_alloc(e, utf8, len, &matches);
+    if (n == SIZE_MAX) return 0;
+    if (out && cap > 0 && n > 0) {
         size_t w = n < cap ? n : cap;
-        memcpy(out, words.v, w * sizeof(rdktr_match));
+        memcpy(out, matches, w * sizeof(rdktr_match));
     }
-    free(words.v);
+    free(matches);
     return n;
 }

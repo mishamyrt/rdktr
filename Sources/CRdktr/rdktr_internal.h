@@ -4,12 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rdktr.h"
+
 #define RDKTR_NONE 0xFFFFFFFFu
 
-/* Blob layout: fixed 100-byte header followed by 4-byte aligned sections.
+/* Blob layout: fixed 104-byte header followed by 4-byte aligned sections.
  * All integers are little-endian u32. Produced by Scripts/compile_rules.py. */
-#define RDKTR_HEADER_SIZE 100
-#define RDKTR_VERSION 1
+#define RDKTR_HEADER_SIZE 104
+#define RDKTR_VERSION 2
 
 typedef struct {
     uint32_t title_off; /* into string pool */
@@ -72,10 +74,27 @@ struct rdktr_engine {
     uint32_t max_phrase_len;
     uint32_t comma_rule_id; /* RDKTR_NONE when disabled */
     uint32_t comma_threshold;
+    char lang[5]; /* NUL-terminated language code, e.g. "ru" */
 };
 
 /* normalize.c: case-fold ASCII and Cyrillic, fold ё -> е. Every replacement
  * keeps the UTF-8 byte length, so `out` offsets match `in` offsets 1:1. */
 void rdktr_normalize_utf8(const uint8_t *in, uint8_t *out, size_t len);
+
+/* engine.c: core scan. Returns the match count and a malloc'd array in
+ * *out_matches (NULL when the count is 0); returns SIZE_MAX on allocation
+ * failure. */
+size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
+                         rdktr_match **out_matches);
+
+/* rules_data.c (generated): rule sets embedded at build time. */
+typedef struct {
+    const char *lang;
+    const uint8_t *data;
+    size_t size;
+} rdktr_embedded_ruleset;
+
+extern const rdktr_embedded_ruleset rdktr_embedded_rulesets[];
+extern const size_t rdktr_embedded_ruleset_count;
 
 #endif /* RDKTR_INTERNAL_H */

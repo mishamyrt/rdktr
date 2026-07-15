@@ -43,7 +43,7 @@ func position(of index: String.Index) -> (line: Int, column: Int) {
 for issue in issues {
     let (line, column) = position(of: issue.range.lowerBound)
     let fragment = text[issue.range].replacingOccurrences(of: "\n", with: "⏎")
-    print("\(line):\(column)\t«\(fragment)» — \(issue.rule.title)")
+    print("\(line):\(column)\t«\(fragment)» — \(issue.rule.title) [\(issue.rule.language)]")
     if !issue.rule.hint.isEmpty {
         print("\t\(issue.rule.hint)")
     }
