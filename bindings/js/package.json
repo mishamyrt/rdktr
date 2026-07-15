@@ -1,0 +1,32 @@
+{
+    "name": "rdktr",
+    "version": "0.1.0",
+    "description": "Fast stop-word / text-cleanliness checker. WASM build of the C core, zero dependencies.",
+    "type": "module",
+    "main": "src/index.js",
+    "types": "src/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./src/index.d.ts",
+            "default": "./src/index.js"
+        },
+        "./rdktr.wasm": "./dist/rdktr.wasm"
+    },
+    "files": [
+        "src",
+        "dist"
+    ],
+    "scripts": {
+        "build": "./build.sh",
+        "test": "node --test"
+    },
+    "keywords": [
+        "text",
+        "linter",
+        "stop-words",
+        "glavred",
+        "plain-language",
+        "wasm"
+    ],
+    "license": "MIT"
+}

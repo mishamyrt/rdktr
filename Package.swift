@@ -5,12 +5,24 @@ let package = Package(
     name: "rdktr",
     products: [
         .library(name: "Rdktr", targets: ["Rdktr"]),
-        .executable(name: "rdktr-cli", targets: ["rdktr-cli"]),
     ],
     targets: [
-        .target(name: "CRdktr"),
-        .target(name: "Rdktr", dependencies: ["CRdktr"]),
-        .executableTarget(name: "rdktr-cli", dependencies: ["Rdktr"]),
-        .testTarget(name: "RdktrTests", dependencies: ["Rdktr"]),
+        .target(
+            name: "CRdktr",
+            path: "core",
+            exclude: ["tests"],
+            sources: ["src"],
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "Rdktr",
+            dependencies: ["CRdktr"],
+            path: "bindings/swift/Rdktr"
+        ),
+        .testTarget(
+            name: "RdktrTests",
+            dependencies: ["Rdktr"],
+            path: "bindings/swift/RdktrTests"
+        ),
     ]
 )

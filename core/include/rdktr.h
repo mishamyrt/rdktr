@@ -1,6 +1,6 @@
 /* rdktr — fast stop-word / text-cleanliness checker.
  *
- * The engine matches a pre-compiled rule set (see Scripts/compile_rules.py)
+ * The engine matches a pre-compiled rule set (see tools/compile_rules.py)
  * against UTF-8 text and reports byte ranges of the original input.
  */
 #ifndef RDKTR_H
