@@ -9,8 +9,7 @@ due to the fact that
 at this point in time
 for the purpose of
 in the event that
-with regard to
-in regard to
+[with|in] regard to
 in terms of
 prior to
 subsequent to

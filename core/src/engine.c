@@ -103,24 +103,36 @@ static void vec_push(match_vec *m, uint32_t start, uint32_t end, uint32_t rule) 
     m->n++;
 }
 
-/* ---- automaton helpers ------------------------------------------------------ */
+/* ---- pattern matching --------------------------------------------------------
+ * Patterns are element sequences (word / prefix / gap / punctuation). The
+ * scanner keeps a small set of partial matches and advances each one on
+ * every token or punctuation codepoint. Partials spawn when a token matches
+ * the first element of a pattern (found via the word/prefix start index). */
 
-static uint32_t ac_next(const rdktr_engine *e, uint32_t state, uint32_t word_id) {
-    for (;;) {
-        const rdktr_ac_state *s = &e->ac_states[state];
-        /* binary search transitions sorted by word_id */
-        uint32_t lo = 0, hi = s->trans_count;
-        const rdktr_ac_trans *t = e->ac_trans + s->trans_start;
-        while (lo < hi) {
-            uint32_t mid = (lo + hi) / 2;
-            if (t[mid].word_id < word_id)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        if (lo < s->trans_count && t[lo].word_id == word_id) return t[lo].next;
-        if (state == 0) return 0;
-        state = s->fail;
+typedef struct {
+    uint32_t pat;   /* pattern id */
+    uint32_t elem;  /* index of the next element to match (within pattern) */
+    uint32_t gap;   /* words consumed by the gap at `elem`, if it is one */
+    uint32_t start; /* byte offset of the first matched token */
+} rdktr_partial;
+
+/* Enough for real texts: a partial lives at most max_phrase_len tokens and
+ * only spawns when a pattern's first word occurs. Overflow drops spawns. */
+#define RDKTR_MAX_PARTIALS 128
+
+typedef struct {
+    rdktr_partial v[RDKTR_MAX_PARTIALS];
+    uint32_t n;
+} partial_set;
+
+static void partial_push(partial_set *s, uint32_t pat, uint32_t elem,
+                         uint32_t gap, uint32_t start) {
+    if (s->n < RDKTR_MAX_PARTIALS) {
+        s->v[s->n].pat = pat;
+        s->v[s->n].elem = elem;
+        s->v[s->n].gap = gap;
+        s->v[s->n].start = start;
+        s->n++;
     }
 }
 
@@ -129,6 +141,103 @@ static void emit_pattern(const rdktr_engine *e, match_vec *out, uint32_t pattern
     const rdktr_pattern_entry *p = &e->pats[pattern_id];
     for (uint32_t i = 0; i < p->rules_count; i++)
         vec_push(out, start, end, e->pat_rules[p->rules_start + i]);
+}
+
+static int prefix_hit(const uint32_t *hits, int n, uint32_t prefix_id) {
+    for (int i = 0; i < n; i++)
+        if (hits[i] == prefix_id) return 1;
+    return 0;
+}
+
+/* Does a word/prefix element accept the current token? */
+static int elem_takes_token(const rdktr_elem *el, uint32_t word_id,
+                            const uint32_t *hits, int n_hits) {
+    if (el->kind == RDKTR_ELEM_WORD)
+        return word_id != RDKTR_NONE && el->a == word_id;
+    if (el->kind == RDKTR_ELEM_PREFIX) return prefix_hit(hits, n_hits, el->a);
+    return 0;
+}
+
+/* Move a partial past element `next_idx` (already matched). Emits the match
+ * when the pattern is complete, otherwise keeps the partial alive. */
+static void partial_advance(const rdktr_engine *e, partial_set *out_set,
+                            match_vec *out, const rdktr_partial *p,
+                            uint32_t next_idx, uint32_t end) {
+    const rdktr_pattern_entry *pat = &e->pats[p->pat];
+    if (next_idx == pat->elem_count)
+        emit_pattern(e, out, p->pat, p->start, end);
+    else
+        partial_push(out_set, p->pat, next_idx, 0, p->start);
+}
+
+/* Advance every partial with the token [tok_start, tok_end). */
+static void partials_on_token(const rdktr_engine *e, partial_set *set,
+                              match_vec *out, uint32_t word_id,
+                              const uint32_t *hits, int n_hits,
+                              uint32_t tok_start, uint32_t tok_end) {
+    partial_set next;
+    next.n = 0;
+
+    for (uint32_t i = 0; i < set->n; i++) {
+        const rdktr_partial *p = &set->v[i];
+        const rdktr_pattern_entry *pat = &e->pats[p->pat];
+        const rdktr_elem *el = &e->elems[pat->elem_start + p->elem];
+        if (el->kind == RDKTR_ELEM_GAP) {
+            /* gap satisfied: the element after it may take this token
+             * (a gap is never the last element) */
+            if (p->gap >= el->a &&
+                elem_takes_token(el + 1, word_id, hits, n_hits))
+                partial_advance(e, &next, out, p, p->elem + 2, tok_end);
+            /* the token may extend the gap */
+            if (p->gap + 1 <= el->b)
+                partial_push(&next, p->pat, p->elem, p->gap + 1, p->start);
+        } else if (elem_takes_token(el, word_id, hits, n_hits)) {
+            partial_advance(e, &next, out, p, p->elem + 1, tok_end);
+        }
+        /* expected punctuation or a mismatch: the partial dies */
+    }
+
+    /* spawn partials whose first element matches this token */
+    if (word_id != RDKTR_NONE) {
+        const rdktr_start_index *si = &e->word_index[word_id];
+        for (uint32_t k = 0; k < si->count; k++) {
+            uint32_t pid = e->start_list[si->start + k];
+            rdktr_partial fresh = {pid, 0, 0, tok_start};
+            partial_advance(e, &next, out, &fresh, 1, tok_end);
+        }
+    }
+    for (int h = 0; h < n_hits; h++) {
+        const rdktr_start_index *si = &e->prefix_index[hits[h]];
+        for (uint32_t k = 0; k < si->count; k++) {
+            uint32_t pid = e->start_list[si->start + k];
+            rdktr_partial fresh = {pid, 0, 0, tok_start};
+            partial_advance(e, &next, out, &fresh, 1, tok_end);
+        }
+    }
+
+    *set = next;
+}
+
+/* Advance partials over a punctuation codepoint ending at `end`. Partials
+ * that do not expect this punctuation die (punctuation breaks phrases). */
+static void partials_on_punct(const rdktr_engine *e, partial_set *set,
+                              match_vec *out, uint32_t cp, uint32_t end) {
+    partial_set next;
+    next.n = 0;
+
+    for (uint32_t i = 0; i < set->n; i++) {
+        const rdktr_partial *p = &set->v[i];
+        const rdktr_pattern_entry *pat = &e->pats[p->pat];
+        const rdktr_elem *el = &e->elems[pat->elem_start + p->elem];
+        if (el->kind == RDKTR_ELEM_PUNCT && el->a == cp) {
+            partial_advance(e, &next, out, p, p->elem + 1, end);
+        } else if (el->kind == RDKTR_ELEM_GAP && p->gap >= el->a &&
+                   el[1].kind == RDKTR_ELEM_PUNCT && el[1].a == cp) {
+            partial_advance(e, &next, out, p, p->elem + 2, end);
+        }
+    }
+
+    *set = next;
 }
 
 /* ---- filtering: leftmost-longest -------------------------------------------- */
@@ -181,23 +290,15 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
     match_vec words = {0};  /* word/phrase matches (filtered for containment) */
     match_vec extra = {0};  /* structural matches (comma rule) */
     uint8_t *norm = NULL;
-    uint32_t *ring = NULL;
 
     if (len > 0) {
         norm = (uint8_t *)malloc(len);
         if (!norm) return SIZE_MAX;
         rdktr_normalize_utf8((const uint8_t *)utf8, norm, len);
     }
-    uint32_t ring_cap = e->max_phrase_len;
-    ring = (uint32_t *)malloc((size_t)ring_cap * sizeof(uint32_t));
-    if (!ring) {
-        free(norm);
-        return SIZE_MAX;
-    }
 
-    uint32_t ac_state = 0;
-    uint32_t ring_pos = 0, ring_count = 0; /* token starts since last break */
-    int break_pending = 0;                 /* punctuation seen between tokens */
+    partial_set parts;
+    parts.n = 0;
 
     /* comma rule state */
     uint32_t commas = 0;
@@ -210,7 +311,8 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
         size_t cplen = decode_cp(norm, i, len, &cp);
 
         if (!is_word_core(cp)) {
-            if (!is_space_cp(cp)) break_pending = 1;
+            if (!is_space_cp(cp))
+                partials_on_punct(e, &parts, &words, cp, (uint32_t)(i + cplen));
             if (cp == ',') commas++;
             if (is_sentence_end(cp)) {
                 if (e->comma_rule_id != RDKTR_NONE && sent_has_text &&
@@ -236,6 +338,7 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
         uint32_t dat = 0;
         int alive = 1;
         uint32_t prefix_hits[8];
+        size_t prefix_hit_end[8];
         int n_prefix = 0;
 
         while (i < len) {
@@ -262,45 +365,25 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
                         break;
                     }
                 }
-                if (alive && e->dat_prefix_pat[dat] != RDKTR_NONE &&
-                    n_prefix < (int)(sizeof(prefix_hits) / sizeof(prefix_hits[0])))
-                    prefix_hits[n_prefix++] = e->dat_prefix_pat[dat];
+                if (alive && e->dat_prefix_id[dat] != RDKTR_NONE &&
+                    n_prefix < (int)(sizeof(prefix_hits) / sizeof(prefix_hits[0]))) {
+                    prefix_hits[n_prefix] = e->dat_prefix_id[dat];
+                    prefix_hit_end[n_prefix] = i + cplen;
+                    n_prefix++;
+                }
             }
             i += cplen;
         }
         size_t tok_end = i;
 
-        for (int k = 0; k < n_prefix; k++)
-            emit_pattern(e, &words, prefix_hits[k], (uint32_t)tok_start,
-                         (uint32_t)tok_end);
+        /* a prefix needs at least one letter after the stem; a hit that
+         * consumed the whole token is the stem itself, not a prefix match */
+        if (n_prefix > 0 && prefix_hit_end[n_prefix - 1] == tok_end) n_prefix--;
 
         uint32_t word_id = alive ? e->dat_word_id[dat] : RDKTR_NONE;
 
-        if (break_pending) {
-            ac_state = 0;
-            ring_count = 0;
-            break_pending = 0;
-        }
-
-        if (word_id == RDKTR_NONE) {
-            /* unknown word: no phrase can span it */
-            ac_state = 0;
-            ring_count = 0;
-            continue;
-        }
-
-        ring[ring_pos] = (uint32_t)tok_start;
-        ring_pos = (ring_pos + 1) % ring_cap;
-        if (ring_count < ring_cap) ring_count++;
-
-        ac_state = ac_next(e, ac_state, word_id);
-        const rdktr_ac_state *st = &e->ac_states[ac_state];
-        for (uint32_t o = 0; o < st->out_count; o++) {
-            const rdktr_ac_out *ao = &e->ac_out[st->out_start + o];
-            if (ao->tok_len > ring_count) continue; /* spans a break: impossible */
-            uint32_t idx = (ring_pos + ring_cap - ao->tok_len) % ring_cap;
-            emit_pattern(e, &words, ao->pattern_id, ring[idx], (uint32_t)tok_end);
-        }
+        partials_on_token(e, &parts, &words, word_id, prefix_hits, n_prefix,
+                          (uint32_t)tok_start, (uint32_t)tok_end);
     }
 
     /* flush the last sentence for the comma rule */
@@ -308,7 +391,6 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
         e->comma_threshold > 0 && commas >= e->comma_threshold)
         vec_push(&extra, (uint32_t)sent_start, (uint32_t)len, e->comma_rule_id);
 
-    free(ring);
     free(norm);
 
     if (words.oom || extra.oom) {

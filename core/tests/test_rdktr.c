@@ -100,6 +100,48 @@ static void test_prefixes(void) {
     EXPECT("высококвалифицированными", 0, "высококвалифицированными",
            "Необъективная оценка");
     EXPECT("we utilized the API", 0, "utilized", "Officialese");
+    /* the stem alone is not a prefix match: needs at least one more letter */
+    EXPECT_TOTAL("пресловут", 0);
+    EXPECT_TOTAL("we utiliz it", 0);
+}
+
+static void test_prefixes_in_phrases(void) {
+    /* rule is "сомнительн* удовольств*" */
+    EXPECT("сомнительное удовольствие", 0, "сомнительное удовольствие",
+           "Бытовой штамп");
+    EXPECT("сомнительным удовольствием", 0, "сомнительным удовольствием",
+           "Бытовой штамп");
+    /* rule is "беззаботн* студенческ* жизн*" */
+    EXPECT("беззаботной студенческой жизни", 0,
+           "беззаботной студенческой жизни", "Газетный штамп");
+    EXPECT_TOTAL("сомнительное решение", 0);
+}
+
+static void test_gaps(void) {
+    /* rule is "в лучших _(0-1) традициях" */
+    EXPECT("в лучших традициях", 0, "в лучших традициях", "Газетный штамп");
+    EXPECT("в лучших боевых традициях", 0, "в лучших боевых традициях",
+           "Газетный штамп");
+    EXPECT_TOTAL("в лучших самых боевых традициях", 0); /* gap max is 1 */
+    /* rule is "в _ жизни": the gap word may be unknown to the dictionary */
+    EXPECT("в чужой жизни", 0, "в чужой жизни", "Газетный штамп");
+    EXPECT_TOTAL("в жизни", 0);            /* gap needs exactly one word */
+    EXPECT_TOTAL("в лучших, традициях", 0); /* punctuation breaks the gap */
+}
+
+static void test_punct_in_patterns(void) {
+    /* rule is "все знают, что": the comma must be present in the text */
+    EXPECT("все знают, что это", 0, "все знают, что", "Газетный штамп");
+    EXPECT_TOTAL("все знают что это", 0);
+    /* rule is "казалось,": trailing comma is part of the match */
+    EXPECT("казалось, дождь", 0, "казалось,", "Газетный штамп");
+    EXPECT_TOTAL("казалось солнце", 0);
+}
+
+static void test_alternatives(void) {
+    /* rule is "[with|in] regard to" */
+    EXPECT("with regard to", 0, "with regard to", "Officialese");
+    EXPECT("in regard to", 0, "in regard to", "Officialese");
 }
 
 static void test_word_boundaries(void) {
@@ -141,7 +183,7 @@ static void test_language_detection(void) {
 }
 
 static void test_apostrophes(void) {
-    /* rule is "don*t miss out": * = optional apostrophe */
+    /* rule is "don['|’]?t miss out": optional apostrophe variants */
     EXPECT("don't miss out", 0, "don't miss out", "Marketing hype");
     EXPECT("don\xE2\x80\x99t miss out", 0, "don\xE2\x80\x99t miss out",
            "Marketing hype"); /* typographic ’ */
@@ -205,6 +247,10 @@ int main(void) {
     test_phrase_gaps();
     test_declensions();
     test_prefixes();
+    test_prefixes_in_phrases();
+    test_gaps();
+    test_punct_in_patterns();
+    test_alternatives();
     test_word_boundaries();
     test_overlaps();
     test_comma_rule();

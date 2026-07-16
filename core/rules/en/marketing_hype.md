@@ -5,14 +5,13 @@ weight: 100
 ---
 
 limited time offer
-don*t miss out
+don['|’]?t miss out
 act now
 buy now
 hurry up
 absolutely free
 no hidden fees
-unbeatable price
-unbeatable prices
+unbeatable price[s]?
 revolutionary
 once-in-a-lifetime
 must-have

@@ -39,21 +39,23 @@ rdktr_engine *rdktr_create(const void *blob_ptr, size_t size) {
     uint32_t dat_base_off = rd32(blob + 32);
     uint32_t dat_check_off = rd32(blob + 36);
     uint32_t dat_word_id_off = rd32(blob + 40);
-    uint32_t dat_prefix_pat_off = rd32(blob + 44);
-    e.pat_count = rd32(blob + 48);
-    uint32_t pat_off = rd32(blob + 52);
-    uint32_t pat_rules_off = rd32(blob + 56);
-    e.pat_rules_count = rd32(blob + 60);
-    e.ac_state_count = rd32(blob + 64);
-    uint32_t ac_states_off = rd32(blob + 68);
-    uint32_t ac_trans_off = rd32(blob + 72);
-    e.ac_trans_count = rd32(blob + 76);
-    uint32_t ac_out_off = rd32(blob + 80);
-    e.ac_out_count = rd32(blob + 84);
-    e.max_phrase_len = rd32(blob + 88);
-    e.comma_rule_id = rd32(blob + 92);
-    e.comma_threshold = rd32(blob + 96);
-    memcpy(e.lang, blob + 100, 4);
+    uint32_t dat_prefix_id_off = rd32(blob + 44);
+    e.word_count = rd32(blob + 48);
+    e.prefix_count = rd32(blob + 52);
+    e.pat_count = rd32(blob + 56);
+    uint32_t pat_off = rd32(blob + 60);
+    uint32_t pat_rules_off = rd32(blob + 64);
+    e.pat_rules_count = rd32(blob + 68);
+    uint32_t elems_off = rd32(blob + 72);
+    e.elem_count = rd32(blob + 76);
+    uint32_t word_index_off = rd32(blob + 80);
+    uint32_t prefix_index_off = rd32(blob + 84);
+    uint32_t start_list_off = rd32(blob + 88);
+    e.start_list_count = rd32(blob + 92);
+    e.max_phrase_len = rd32(blob + 96);
+    e.comma_rule_id = rd32(blob + 100);
+    e.comma_threshold = rd32(blob + 104);
+    memcpy(e.lang, blob + 108, 4);
     e.lang[4] = '\0';
 
     if (!section_ok(total_size, rules_off, (uint64_t)e.rule_count * 12)) return NULL;
@@ -64,13 +66,13 @@ rdktr_engine *rdktr_create(const void *blob_ptr, size_t size) {
     if (!section_ok(total_size, dat_base_off, (uint64_t)e.dat_size * 4)) return NULL;
     if (!section_ok(total_size, dat_check_off, (uint64_t)e.dat_size * 4)) return NULL;
     if (!section_ok(total_size, dat_word_id_off, (uint64_t)e.dat_size * 4)) return NULL;
-    if (!section_ok(total_size, dat_prefix_pat_off, (uint64_t)e.dat_size * 4)) return NULL;
-    if (!section_ok(total_size, pat_off, (uint64_t)e.pat_count * 8)) return NULL;
+    if (!section_ok(total_size, dat_prefix_id_off, (uint64_t)e.dat_size * 4)) return NULL;
+    if (!section_ok(total_size, pat_off, (uint64_t)e.pat_count * 16)) return NULL;
     if (!section_ok(total_size, pat_rules_off, (uint64_t)e.pat_rules_count * 4)) return NULL;
-    if (e.ac_state_count == 0) return NULL;
-    if (!section_ok(total_size, ac_states_off, (uint64_t)e.ac_state_count * 20)) return NULL;
-    if (!section_ok(total_size, ac_trans_off, (uint64_t)e.ac_trans_count * 8)) return NULL;
-    if (!section_ok(total_size, ac_out_off, (uint64_t)e.ac_out_count * 8)) return NULL;
+    if (!section_ok(total_size, elems_off, (uint64_t)e.elem_count * 12)) return NULL;
+    if (!section_ok(total_size, word_index_off, (uint64_t)e.word_count * 8)) return NULL;
+    if (!section_ok(total_size, prefix_index_off, (uint64_t)e.prefix_count * 8)) return NULL;
+    if (!section_ok(total_size, start_list_off, (uint64_t)e.start_list_count * 4)) return NULL;
     if (e.max_phrase_len == 0 || e.max_phrase_len > 1024) return NULL;
     if (e.comma_rule_id != RDKTR_NONE && e.comma_rule_id >= e.rule_count) return NULL;
 
@@ -79,12 +81,13 @@ rdktr_engine *rdktr_create(const void *blob_ptr, size_t size) {
     e.dat_base = (const uint32_t *)(blob + dat_base_off);
     e.dat_check = (const uint32_t *)(blob + dat_check_off);
     e.dat_word_id = (const uint32_t *)(blob + dat_word_id_off);
-    e.dat_prefix_pat = (const uint32_t *)(blob + dat_prefix_pat_off);
+    e.dat_prefix_id = (const uint32_t *)(blob + dat_prefix_id_off);
     e.pats = (const rdktr_pattern_entry *)(blob + pat_off);
     e.pat_rules = (const uint32_t *)(blob + pat_rules_off);
-    e.ac_states = (const rdktr_ac_state *)(blob + ac_states_off);
-    e.ac_trans = (const rdktr_ac_trans *)(blob + ac_trans_off);
-    e.ac_out = (const rdktr_ac_out *)(blob + ac_out_off);
+    e.elems = (const rdktr_elem *)(blob + elems_off);
+    e.word_index = (const rdktr_start_index *)(blob + word_index_off);
+    e.prefix_index = (const rdktr_start_index *)(blob + prefix_index_off);
+    e.start_list = (const uint32_t *)(blob + start_list_off);
 
     /* cross-references */
     for (uint32_t i = 0; i < e.rule_count; i++) {
@@ -92,29 +95,57 @@ rdktr_engine *rdktr_create(const void *blob_ptr, size_t size) {
         if (e.rules[i].desc_off >= e.strpool_size) return NULL;
     }
     for (uint32_t i = 0; i < e.pat_count; i++) {
-        uint64_t end = (uint64_t)e.pats[i].rules_start + e.pats[i].rules_count;
-        if (end > e.pat_rules_count) return NULL;
+        const rdktr_pattern_entry *p = &e.pats[i];
+        if ((uint64_t)p->rules_start + p->rules_count > e.pat_rules_count) return NULL;
+        if (p->elem_count == 0) return NULL;
+        if ((uint64_t)p->elem_start + p->elem_count > e.elem_count) return NULL;
+        /* the engine spawns partials on words/prefixes and needs a non-gap
+         * final element to terminate a match */
+        uint32_t first = e.elems[p->elem_start].kind;
+        uint32_t last = e.elems[p->elem_start + p->elem_count - 1].kind;
+        if (first != RDKTR_ELEM_WORD && first != RDKTR_ELEM_PREFIX) return NULL;
+        if (last == RDKTR_ELEM_GAP) return NULL;
     }
     for (uint32_t i = 0; i < e.pat_rules_count; i++) {
         if (e.pat_rules[i] >= e.rule_count) return NULL;
     }
-    for (uint32_t i = 0; i < e.ac_state_count; i++) {
-        const rdktr_ac_state *s = &e.ac_states[i];
-        if ((uint64_t)s->trans_start + s->trans_count > e.ac_trans_count) return NULL;
-        if ((uint64_t)s->out_start + s->out_count > e.ac_out_count) return NULL;
-        if (s->fail >= e.ac_state_count) return NULL;
+    for (uint32_t i = 0; i < e.elem_count; i++) {
+        const rdktr_elem *el = &e.elems[i];
+        switch (el->kind) {
+            case RDKTR_ELEM_WORD:
+                if (el->a >= e.word_count) return NULL;
+                break;
+            case RDKTR_ELEM_PREFIX:
+                if (el->a >= e.prefix_count) return NULL;
+                break;
+            case RDKTR_ELEM_GAP:
+                if (el->a > el->b || el->b == 0 || el->b > 64) return NULL;
+                break;
+            case RDKTR_ELEM_PUNCT:
+                if (el->a == 0 || el->a >= 0x110000) return NULL;
+                break;
+            default:
+                return NULL;
+        }
     }
-    for (uint32_t i = 0; i < e.ac_trans_count; i++) {
-        if (e.ac_trans[i].next >= e.ac_state_count) return NULL;
-    }
-    for (uint32_t i = 0; i < e.ac_out_count; i++) {
-        if (e.ac_out[i].pattern_id >= e.pat_count) return NULL;
-        if (e.ac_out[i].tok_len == 0 || e.ac_out[i].tok_len > e.max_phrase_len)
+    for (uint32_t i = 0; i < e.word_count; i++) {
+        if ((uint64_t)e.word_index[i].start + e.word_index[i].count >
+            e.start_list_count)
             return NULL;
+    }
+    for (uint32_t i = 0; i < e.prefix_count; i++) {
+        if ((uint64_t)e.prefix_index[i].start + e.prefix_index[i].count >
+            e.start_list_count)
+            return NULL;
+    }
+    for (uint32_t i = 0; i < e.start_list_count; i++) {
+        if (e.start_list[i] >= e.pat_count) return NULL;
     }
     for (uint32_t i = 0; i < e.dat_size; i++) {
         if (e.dat_check[i] != RDKTR_NONE && e.dat_check[i] >= e.dat_size) return NULL;
-        if (e.dat_prefix_pat[i] != RDKTR_NONE && e.dat_prefix_pat[i] >= e.pat_count)
+        if (e.dat_word_id[i] != RDKTR_NONE && e.dat_word_id[i] >= e.word_count)
+            return NULL;
+        if (e.dat_prefix_id[i] != RDKTR_NONE && e.dat_prefix_id[i] >= e.prefix_count)
             return NULL;
     }
 

@@ -8,10 +8,10 @@
 
 #define RDKTR_NONE 0xFFFFFFFFu
 
-/* Blob layout: fixed 104-byte header followed by 4-byte aligned sections.
- * All integers are little-endian u32. Produced by Scripts/compile_rules.py. */
-#define RDKTR_HEADER_SIZE 104
-#define RDKTR_VERSION 2
+/* Blob layout: fixed 112-byte header followed by 4-byte aligned sections.
+ * All integers are little-endian u32. Produced by scripts/compile_rules.py. */
+#define RDKTR_HEADER_SIZE 112
+#define RDKTR_VERSION 3
 
 typedef struct {
     uint32_t title_off; /* into string pool */
@@ -19,28 +19,32 @@ typedef struct {
     uint32_t weight;
 } rdktr_rule_entry;
 
+/* A pattern is a sequence of elements matched against the token stream. */
+enum {
+    RDKTR_ELEM_WORD = 0,   /* a = word id (exact match) */
+    RDKTR_ELEM_PREFIX = 1, /* a = prefix id (stem + at least one letter) */
+    RDKTR_ELEM_GAP = 2,    /* a..b arbitrary words */
+    RDKTR_ELEM_PUNCT = 3   /* a = punctuation codepoint, e.g. ',' */
+};
+
 typedef struct {
+    uint32_t kind;
+    uint32_t a;
+    uint32_t b;
+} rdktr_elem;
+
+typedef struct {
+    uint32_t elem_start; /* into elems array */
+    uint32_t elem_count;
     uint32_t rules_start; /* into pat_rules array */
     uint32_t rules_count;
 } rdktr_pattern_entry;
 
+/* Slice of start_list: patterns whose first element is a given word/prefix. */
 typedef struct {
-    uint32_t trans_start; /* into ac_trans array */
-    uint32_t trans_count;
-    uint32_t fail;
-    uint32_t out_start; /* into ac_out array */
-    uint32_t out_count;
-} rdktr_ac_state;
-
-typedef struct {
-    uint32_t word_id;
-    uint32_t next;
-} rdktr_ac_trans;
-
-typedef struct {
-    uint32_t pattern_id;
-    uint32_t tok_len; /* pattern length in words */
-} rdktr_ac_out;
+    uint32_t start;
+    uint32_t count;
+} rdktr_start_index;
 
 struct rdktr_engine {
     const uint8_t *blob;
@@ -55,24 +59,26 @@ struct rdktr_engine {
     uint32_t dat_size;
     const uint32_t *dat_base;
     const uint32_t *dat_check;
-    const uint32_t *dat_word_id;    /* exact-word terminal -> word id */
-    const uint32_t *dat_prefix_pat; /* prefix terminal -> pattern id */
+    const uint32_t *dat_word_id;   /* exact-word terminal -> word id */
+    const uint32_t *dat_prefix_id; /* prefix terminal -> prefix id */
+    uint32_t word_count;
+    uint32_t prefix_count;
 
     uint32_t pat_count;
     const rdktr_pattern_entry *pats;
     const uint32_t *pat_rules;
     uint32_t pat_rules_count;
+    const rdktr_elem *elems;
+    uint32_t elem_count;
 
-    /* phrase automaton (Aho-Corasick over word ids) */
-    uint32_t ac_state_count;
-    const rdktr_ac_state *ac_states;
-    const rdktr_ac_trans *ac_trans;
-    uint32_t ac_trans_count;
-    const rdktr_ac_out *ac_out;
-    uint32_t ac_out_count;
+    /* pattern start index by first element */
+    const rdktr_start_index *word_index;   /* word_count entries */
+    const rdktr_start_index *prefix_index; /* prefix_count entries */
+    const uint32_t *start_list;            /* pattern ids */
+    uint32_t start_list_count;
 
-    uint32_t max_phrase_len;
-    uint32_t comma_rule_id; /* RDKTR_NONE when disabled */
+    uint32_t max_phrase_len; /* max pattern span in tokens (sanity bound) */
+    uint32_t comma_rule_id;  /* RDKTR_NONE when disabled */
     uint32_t comma_threshold;
     char lang[5]; /* NUL-terminated language code, e.g. "ru" */
 };
