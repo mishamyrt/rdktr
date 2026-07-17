@@ -38,8 +38,15 @@ def split_tokens(line: str, ctx: str) -> list[str]:
     together with their token."""
     toks: list[str] = []
     cur, depth = "", 0
+    esc = False
     for ch in line:
-        if ch == "[":
+        if esc:  # a backslash-escaped char is literal, e.g. \[ or \(
+            esc = False
+            cur += ch
+        elif ch == "\\":
+            esc = True
+            cur += ch
+        elif ch == "[":
             depth += 1
             cur += ch
         elif ch == "]":
@@ -53,6 +60,8 @@ def split_tokens(line: str, ctx: str) -> list[str]:
                 cur = ""
         else:
             cur += ch
+    if esc:
+        raise SystemExit(f"{ctx}: dangling '\\' at end of line: {line!r}")
     if depth:
         raise SystemExit(f"{ctx}: unbalanced '[' in {line!r}")
     if cur:

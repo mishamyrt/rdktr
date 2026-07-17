@@ -21,8 +21,8 @@ final class RdktrTests: XCTestCase {
     // MARK: exact words and phrases
 
     func testExactWord() {
-        XCTAssertEqual(titles("Это очень важно"), ["Усилители"])
-        XCTAssertEqual(fragments("Это очень важно"), ["очень"])
+        XCTAssertEqual(titles("Это очень важно"), ["Усилители", "Необъективная оценка"])
+        XCTAssertEqual(fragments("Это очень важно"), ["очень", "важно"])
     }
 
     func testExactPhrase() {
@@ -62,7 +62,7 @@ final class RdktrTests: XCTestCase {
         XCTAssertEqual(titles("данным"), ["Канцеляризм"])
         XCTAssertEqual(titles("в данных обстоятельствах"), ["Канцеляризм"])
         XCTAssertEqual(titles("нет возможностей"), ["Фичеризм"])
-        XCTAssertEqual(titles("существовали"), ["Слабый глагол"])
+        XCTAssertEqual(titles("существует"), ["Слабый глагол"])
     }
 
     // MARK: prefix patterns
@@ -76,8 +76,10 @@ final class RdktrTests: XCTestCase {
     // MARK: word boundaries
 
     func testNoSubwordMatches() {
-        // "вы" is a rule word, "выше" must not match it
-        XCTAssertEqual(titles("выше"), [])
+        // "вы" is a rule word, but "выше" matches only as the whole word
+        // (a form of ~высокий), never as the "вы" fragment
+        XCTAssertEqual(fragments("выше"), ["выше"])
+        XCTAssertEqual(titles("выше"), ["Необъективная оценка"])
         // "я" inside a word
         XCTAssertEqual(titles("яблоня"), [])
     }
@@ -105,10 +107,10 @@ final class RdktrTests: XCTestCase {
     }
 
     func testSamePhraseInTwoRules() {
-        // "сможете создать" belongs to газетный штамп and модальный глагол
-        let found = Set(titles("вы сможете создать"))
-        XCTAssertTrue(found.contains("Газетный штамп"))
-        XCTAssertTrue(found.contains("Фраза с модальным глаголом"))
+        // "большею" is a form in the lexeme sets of two different rules
+        let found = Set(titles("большею"))
+        XCTAssertTrue(found.contains("Необъективная оценка"))
+        XCTAssertTrue(found.contains("Усилители"))
     }
 
     // MARK: comma rule (structural)
@@ -133,8 +135,8 @@ final class RdktrTests: XCTestCase {
 
     func testRuleMetadata() {
         XCTAssertEqual(TextChecker.embeddedLanguages, ["en", "ru"])
-        XCTAssertEqual(checker.rules.filter { $0.language == "ru" }.count, 18)
-        XCTAssertEqual(checker.rules.filter { $0.language == "en" }.count, 9)
+        XCTAssertEqual(checker.rules.filter { $0.language == "ru" }.count, 28)
+        XCTAssertEqual(checker.rules.filter { $0.language == "en" }.count, 11)
         let kanc = checker.rules.first { $0.title == "Канцеляризм" }
         XCTAssertNotNil(kanc)
         XCTAssertEqual(kanc?.weight, 100)
@@ -176,7 +178,7 @@ final class RdktrTests: XCTestCase {
     func testForeignWordInsideParagraphIsNotChecked() {
         // the paragraph is Cyrillic-dominant, so only Russian rules apply
         XCTAssertEqual(titles("Мы сделали это very аккуратно и очень быстро"),
-                       ["Личное местоимение", "Усилители"])
+                       ["Личное местоимение", "Усилители", "Необъективная оценка"])
     }
 
     func testAmbiguousParagraphFallsBackToDocumentLanguage() {
@@ -190,7 +192,7 @@ final class RdktrTests: XCTestCase {
     func testFixedLanguageChecker() {
         let en = TextChecker(language: "en")
         XCTAssertNotNil(en)
-        XCTAssertEqual(en!.rules.count, 9)
+        XCTAssertEqual(en!.rules.count, 11)
         // no detection: English rules apply regardless of surrounding script
         XCTAssertEqual(en!.check("очень very").map { $0.rule.title }, ["Intensifier"])
         XCTAssertNil(TextChecker(language: "de"))
@@ -198,8 +200,29 @@ final class RdktrTests: XCTestCase {
 
     func testPhraseMorphologyExpansion() {
         // "~принимать участие" / "~принять участие" expand inside the phrase
-        XCTAssertEqual(titles("они принимали участие"), ["Газетный штамп"])
-        XCTAssertEqual(titles("он примет участие"), ["Газетный штамп"])
+        XCTAssertEqual(titles("они принимали участие"),
+                       ["Личное местоимение", "Газетный штамп"])
+        XCTAssertEqual(titles("он примет участие"),
+                       ["Личное местоимение", "Газетный штамп"])
+    }
+
+    // MARK: punctuation rules
+
+    func testRepeatedExclamationMarks() {
+        let text = "Приходите завтра!! Обсудим"
+        let issues = checker.check(text)
+        XCTAssertEqual(issues.count, 1)
+        XCTAssertEqual(String(text[issues[0].range]), "!!")
+        XCTAssertEqual(issues[0].rule.title, "Слишком эмоционально")
+        XCTAssertEqual(titles("Приходите завтра! Обсудим"), [])
+    }
+
+    func testParentheses() {
+        let text = "Дошли (наконец) до дома"
+        let issues = checker.check(text)
+        XCTAssertEqual(issues.count, 1)
+        XCTAssertEqual(String(text[issues[0].range]), "(наконец)")
+        XCTAssertEqual(issues[0].rule.title, "Текст в скобках")
     }
 
     func testEmptyAndDegenerateInput() {

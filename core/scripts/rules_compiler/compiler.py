@@ -6,7 +6,20 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
-from .constants import ELEM_GAP, ELEM_PREFIX, ELEM_PUNCT, ELEM_WORD, MAX_COMBOS, MAX_GAP, NONE
+from .constants import (
+    ELEM_ANY,
+    ELEM_GAP,
+    ELEM_LEXEME,
+    ELEM_PREFIX,
+    ELEM_PUNCT,
+    ELEM_PUNCT_RUN,
+    ELEM_WORD,
+    MAX_ANY_SPAN,
+    MAX_COMBOS,
+    MAX_GAP,
+    MAX_PUNCT_RUN,
+    NONE,
+)
 from .normalize import is_word_char, normalize, word_variants
 from .rule_file import expand_brackets, parse_rule_file, split_tokens
 
@@ -15,9 +28,25 @@ if TYPE_CHECKING:
 
 COMMA_RULE_RE = re.compile(r"^_(\s*,\s*_)+$")
 GAP_RE = re.compile(r"^_(?:\((\d+)(?:-(\d+))?\))?$")
+# A standalone punctuation token: one bare char (that is not a syntax
+# metacharacter) or any backslash-escaped char, plus an optional repeat
+# count in the gap style: !(2), !(2-5), !(2+).
+PUNCT_TOKEN_RE = re.compile(
+    r"^(?:\\(?P<esc>[^\w\s])|(?P<bare>[^\w\s~*\[\]|?_()\\]))"
+    r"(?:\((?P<lo>\d+)(?:-(?P<hi>\d+))?(?P<plus>\+)?\))?$"
+)
 
-# ("w", form) | ("p", stem) | ("g", lo, hi) | ("c", codepoint)
-type Element = tuple[str, str] | tuple[str, int, int] | tuple[str, int]
+# ("w", form) | ("p", stem) | ("l", forms) | ("g", lo, hi) | ("c", codepoint)
+# | ("C", codepoint, lo, hi) punctuation run, hi == 0 means unbounded
+# | ("a", lo, hi) wide gap `__`: words and punctuation both count;
+# "l" carries a sorted tuple of >= 2 inflected forms matched as one element.
+type Element = (
+    tuple[str, str]
+    | tuple[str, tuple[str, ...]]
+    | tuple[str, int, int]
+    | tuple[str, int]
+    | tuple[str, int, int, int]
+)
 # One pattern-line token expanded: alternatives, each a sequence of elements
 # (empty for an optional word that is absent).
 type Slot = list[list[Element]]
@@ -43,6 +72,8 @@ class Compiler:
         self.patterns: list[set[int]] = []  # pattern_id -> set(rule_ids)
         self.pattern_keys: list[PatternKey] = []  # pattern_id -> tuple of elements
         self.pattern_by_key: dict[PatternKey, int] = {}
+        self.lexeme_ids: dict[tuple[int, ...], int] = {}  # word-id set -> id
+        self.lexeme_sets: list[tuple[int, ...]] = []  # lexeme_id -> word ids
         self.comma_rule_id = NONE
         self.comma_threshold = 0
         self.form_count = 0
@@ -61,6 +92,15 @@ class Compiler:
             pid = len(self.prefix_ids)
             self.prefix_ids[stem] = pid
         return pid
+
+    def lexeme_id(self, wids: list[int]) -> int:
+        key = tuple(sorted(set(wids)))
+        lid = self.lexeme_ids.get(key)
+        if lid is None:
+            lid = len(self.lexeme_sets)
+            self.lexeme_ids[key] = lid
+            self.lexeme_sets.append(key)
+        return lid
 
     def _pattern(self, key: PatternKey) -> int:
         pid = self.pattern_by_key.get(key)
@@ -109,7 +149,9 @@ class Compiler:
             for f in forms:
                 self._validate_word(f, ctx)
             self.form_count += len(forms)
-            return [("w", f) for f in forms]
+            if len(forms) == 1:
+                return [("w", forms[0])]
+            return [("l", tuple(forms))]
         if word.endswith("*"):
             stem = normalize(word[:-1])
             if "*" in stem:
@@ -128,6 +170,28 @@ class Compiler:
         self._validate_word(w, ctx)
         return [("w", v) for v in word_variants(w)]
 
+    def punct_slot(self, m: "re.Match[str]", ctx: str) -> Slot:
+        """Matched PUNCT_TOKEN_RE -> a single punctuation element."""
+        ch = m.group("esc") or m.group("bare")
+        cp = ord(ch)
+        if m.group("lo") is None:
+            return [[("c", cp)]]
+        lo = int(m.group("lo"))
+        if m.group("plus"):
+            hi = 0  # unbounded
+        elif m.group("hi") is not None:
+            hi = int(m.group("hi"))
+        else:
+            hi = lo
+        if lo < 1 or lo > MAX_PUNCT_RUN or hi > MAX_PUNCT_RUN or (hi and hi < lo):
+            raise SystemExit(
+                f"{ctx}: bad punctuation count in {m.group(0)!r}"
+                f" (need 1 <= min <= max <= {MAX_PUNCT_RUN})"
+            )
+        if (lo, hi) == (1, 1):
+            return [[("c", cp)]]
+        return [[("C", cp, lo, hi)]]
+
     def token_slot(self, tok: str, ctx: str) -> Slot:
         """Raw token -> list of alternatives; each alternative is a list of
         elements (empty for an optional word that is absent)."""
@@ -144,8 +208,15 @@ class Compiler:
                     f" 1 <= max <= {MAX_GAP})"
                 )
             return [[("g", lo, hi)]]
+        if tok == "__":
+            return [[("a", 1, MAX_ANY_SPAN)]]
         if tok.startswith("_"):
             raise SystemExit(f"{ctx}: bad gap syntax {tok!r}; use _, _(2) or _(0-3)")
+        if "\\" in tok:
+            raise SystemExit(
+                f"{ctx}: '\\' only escapes a standalone punctuation"
+                f" character, e.g. \\( or \\): {tok!r}"
+            )
         alts: Slot = []
         for s in expand_brackets(tok, ctx):
             if "?" in s:
@@ -163,6 +234,10 @@ class Compiler:
         slots: list[Slot] = []
         punct_slot: Slot = [[("c", ord(","))]]
         for tok in split_tokens(line, ctx):
+            m = PUNCT_TOKEN_RE.match(tok)
+            if m:  # standalone punctuation, possibly with a repeat count
+                slots.append(self.punct_slot(m, ctx))
+                continue
             trailing = 0
             while tok.endswith(","):
                 tok = tok[:-1]
@@ -177,18 +252,21 @@ class Compiler:
 
     def _check_sequence(self, seq: list[Element], ctx: str, line: str) -> None:
         kinds = [el[0] for el in seq]
-        if not any(k in ("w", "p") for k in kinds):
-            raise SystemExit(f"{ctx}: pattern needs at least one word: {line!r}")
-        if kinds[0] not in ("w", "p"):
+        if kinds[0] not in ("w", "p", "l", "c", "C"):
             raise SystemExit(
-                f"{ctx}: pattern cannot start with a gap or punctuation: {line!r}"
+                f"{ctx}: pattern cannot start with a gap: {line!r}"
             )
-        if kinds[-1] == "g":
+        if kinds[-1] in ("g", "a"):
             raise SystemExit(f"{ctx}: pattern cannot end with a gap: {line!r}")
         for a, b in zip(kinds, kinds[1:]):
-            if a == "g" and b == "g":
+            if a in ("g", "a") and b in ("g", "a"):
                 raise SystemExit(
                     f"{ctx}: adjacent gaps; merge them into one _(n-m): {line!r}"
+                )
+            if a in ("g", "a") and b == "C":
+                raise SystemExit(
+                    f"{ctx}: a punctuation repeat cannot follow a gap;"
+                    f" anchor it with a word or a single sign first: {line!r}"
                 )
 
     def add_rule_file(self, path: Path) -> None:
@@ -236,8 +314,16 @@ class Compiler:
                         key.append((ELEM_WORD, self.word_id(el[1]), 0))
                     elif el[0] == "p":
                         key.append((ELEM_PREFIX, self.prefix_id(el[1]), 0))
+                    elif el[0] == "l":
+                        wids = [self.word_id(f) for f in el[1]]
+                        key.append((ELEM_LEXEME, self.lexeme_id(wids), 0))
                     elif el[0] == "g":
                         key.append((ELEM_GAP, el[1], el[2]))
+                    elif el[0] == "a":
+                        key.append((ELEM_ANY, el[1], el[2]))
+                    elif el[0] == "C":
+                        # run bounds packed into b: min | max << 8 (0 = open)
+                        key.append((ELEM_PUNCT_RUN, el[1], el[2] | (el[3] << 8)))
                     else:  # 'c'
                         key.append((ELEM_PUNCT, el[1], 0))
                 pid = self._pattern(tuple(key))

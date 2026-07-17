@@ -4,7 +4,21 @@ from pathlib import Path
 import struct
 
 from .compiler import Compiler
-from .constants import ELEM_GAP, ELEM_PUNCT, ELEM_WORD, HEADER_SIZE, MAGIC, VERSION
+from .constants import (
+    ELEM_ANY,
+    ELEM_GAP,
+    ELEM_LEXEME,
+    ELEM_PREFIX,
+    ELEM_PUNCT,
+    ELEM_PUNCT_RUN,
+    ELEM_WORD,
+    HEADER_SIZE,
+    MAGIC,
+    NONE,
+    NONE16,
+    U16_MAX_ID,
+    VERSION,
+)
 from .trie import Trie
 
 
@@ -75,6 +89,13 @@ def build_blob(comp: Compiler) -> bytes:
         for r in comp.rules
     ]
 
+    # lexeme sets: sorted word-id slices referenced by ELEM_LEXEME
+    lexeme_index: list[tuple[int, int]] = []
+    lexeme_words: list[int] = []
+    for s in comp.lexeme_sets:
+        lexeme_index.append((len(lexeme_words), len(s)))
+        lexeme_words.extend(s)  # already sorted & deduplicated by lexeme_id()
+
     # patterns: flattened element sequences + rule lists
     elems: list[tuple[int, int, int]] = []
     pat_entries: list[tuple[int, int, int, int]] = []
@@ -85,19 +106,32 @@ def build_blob(comp: Compiler) -> bytes:
         span = 0
         for kind, a, b in key:
             elems.append((kind, a, b))
-            span += b if kind == ELEM_GAP else (1 if kind != ELEM_PUNCT else 0)
+            if kind in (ELEM_GAP, ELEM_ANY):
+                span += b
+            elif kind not in (ELEM_PUNCT, ELEM_PUNCT_RUN):
+                span += 1
         max_span = max(max_span, span)
         rules = sorted(comp.patterns[pid])
         pat_entries.append((elem_start, len(key), len(pat_rules), len(rules)))
         pat_rules.extend(rules)
 
-    # start index: pattern ids grouped by their first element
+    # start index: pattern ids grouped by the words that can begin them;
+    # a lexeme-initial pattern is seeded by every member form. Punctuation-
+    # initial patterns go into a flat list scanned on every punctuation char.
     word_first: dict[int, list[int]] = {}
     prefix_first: dict[int, list[int]] = {}
+    punct_start: list[int] = []
     for pid, key in enumerate(comp.pattern_keys):
         kind, a, _ = key[0]
-        d = word_first if kind == ELEM_WORD else prefix_first
-        d.setdefault(a, []).append(pid)
+        if kind == ELEM_WORD:
+            word_first.setdefault(a, []).append(pid)
+        elif kind == ELEM_PREFIX:
+            prefix_first.setdefault(a, []).append(pid)
+        elif kind in (ELEM_PUNCT, ELEM_PUNCT_RUN):
+            punct_start.append(pid)
+        else:  # ELEM_LEXEME
+            for wid in comp.lexeme_sets[a]:
+                word_first.setdefault(wid, []).append(pid)
     start_list: list[int] = []
     word_index: list[tuple[int, int]] = []
     for wid in range(len(comp.word_ids)):
@@ -109,6 +143,33 @@ def build_blob(comp: Compiler) -> bytes:
         lst = prefix_first.get(pid, [])
         prefix_index.append((len(start_list), len(lst)))
         start_list.extend(lst)
+
+    # --- u16 range guards (hard errors, never silent truncation) ---
+    def check_limit(name: str, value: int, limit: int) -> None:
+        if value > limit:
+            raise SystemExit(
+                f"[{comp.lang}] blob format overflow: {name} = {value}"
+                f" exceeds {limit}; the u16 format is out of headroom"
+            )
+
+    check_limit("dat_size", len(base), U16_MAX_ID)
+    check_limit("max(dat_base)", max(base), 0xFFFF)
+    check_limit("word_count", len(comp.word_ids), U16_MAX_ID)
+    check_limit("prefix_count", len(comp.prefix_ids), U16_MAX_ID)
+    check_limit("rule_count", len(comp.rules), 0xFFFF)
+    check_limit("pattern_count", len(pat_entries), 0xFFFF)
+    check_limit("element_count", len(elems), 0xFFFF)
+    check_limit("pat_rules_count", len(pat_rules), 0xFFFF)
+    check_limit("start_list_count", len(start_list), 0xFFFF)
+    check_limit("lexeme_count", len(lexeme_index), 0xFFFF)
+    check_limit("lexeme_words_count", len(lexeme_words), 0xFFFF)
+    check_limit("punct_start_count", len(punct_start), 0xFFFF)
+    for kind, a, b in elems:
+        if kind in (ELEM_PUNCT, ELEM_PUNCT_RUN):
+            check_limit("punct codepoint", a, 0xFFFF)
+
+    def to16(values: list[int]) -> list[int]:
+        return [NONE16 if v == NONE else v for v in values]
 
     # --- assemble sections ---
     def align4(buf: bytearray) -> None:
@@ -123,29 +184,37 @@ def build_blob(comp: Compiler) -> bytes:
         body.extend(fmt_items)
         return off
 
+    def u16s(values: list[int]) -> bytes:
+        return struct.pack(f"<{len(values)}H", *values)
+
     rules_off = section(
         b"".join(struct.pack("<III", *e) for e in rule_entries)
     )
     strpool_off = section(bytes(pool) if pool else b"\0")
     strpool_size = len(pool) if pool else 1
-    dat_base_off = section(struct.pack(f"<{len(base)}I", *base))
-    dat_check_off = section(struct.pack(f"<{len(check)}I", *check))
-    dat_wordid_off = section(struct.pack(f"<{len(wid_arr)}I", *wid_arr))
-    dat_prefixid_off = section(struct.pack(f"<{len(pfx_arr)}I", *pfx_arr))
-    pat_off = section(b"".join(struct.pack("<IIII", *e) for e in pat_entries))
-    pat_rules_off = section(struct.pack(f"<{len(pat_rules)}I", *pat_rules))
-    elems_off = section(b"".join(struct.pack("<III", *e) for e in elems))
+    dat_base_off = section(u16s(base))
+    dat_check_off = section(u16s(to16(check)))
+    dat_wordid_off = section(u16s(to16(wid_arr)))
+    dat_prefixid_off = section(u16s(to16(pfx_arr)))
+    pat_off = section(b"".join(struct.pack("<HHHH", *e) for e in pat_entries))
+    pat_rules_off = section(u16s(pat_rules))
+    elems_off = section(b"".join(struct.pack("<HHH", *e) for e in elems))
     word_index_off = section(
-        b"".join(struct.pack("<II", *e) for e in word_index)
+        b"".join(struct.pack("<HH", *e) for e in word_index)
     )
     prefix_index_off = section(
-        b"".join(struct.pack("<II", *e) for e in prefix_index)
+        b"".join(struct.pack("<HH", *e) for e in prefix_index)
     )
-    start_list_off = section(struct.pack(f"<{len(start_list)}I", *start_list))
+    start_list_off = section(u16s(start_list))
+    lexeme_index_off = section(
+        b"".join(struct.pack("<HH", *e) for e in lexeme_index)
+    )
+    lexeme_words_off = section(u16s(lexeme_words))
+    punct_start_off = section(u16s(punct_start))
     align4(body)
 
     header = struct.pack(
-        "<4s" + "I" * 26 + "4s",
+        "<4s" + "I" * 32 + "4s",
         MAGIC,
         VERSION,
         len(body),
@@ -170,9 +239,15 @@ def build_blob(comp: Compiler) -> bytes:
         prefix_index_off,
         start_list_off,
         len(start_list),
+        len(lexeme_index),
+        lexeme_index_off,
+        lexeme_words_off,
+        len(lexeme_words),
         max_span,
         comp.comma_rule_id,
         comp.comma_threshold,
+        punct_start_off,
+        len(punct_start),
         comp.lang.encode("ascii").ljust(4, b"\0"),
     )
     assert len(header) == HEADER_SIZE, len(header)
@@ -183,6 +258,8 @@ def build_blob(comp: Compiler) -> bytes:
         "words": len(comp.word_ids),
         "prefixes": len(comp.prefix_ids),
         "expanded_forms": comp.form_count,
+        "lexemes": len(comp.lexeme_sets),
+        "lexeme_words": len(lexeme_words),
         "patterns": len(comp.patterns),
         "elements": len(elems),
         "dat_slots": len(base),

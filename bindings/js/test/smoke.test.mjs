@@ -19,16 +19,17 @@ test("offsets are UTF-16 code units (surrogate pairs)", async () => {
     const checker = await createChecker();
     const text = "🚀🚀 это очень быстро";
     const issues = checker.check(text);
-    assert.equal(issues.length, 1);
+    assert.equal(issues.length, 2);
     assert.equal(text.slice(issues[0].start, issues[0].end), "очень");
+    assert.equal(text.slice(issues[1].start, issues[1].end), "быстро");
     checker.destroy();
 });
 
 test("rule metadata is exposed", async () => {
     const checker = await createChecker();
-    assert.equal(checker.rules.length, 27);
-    assert.equal(checker.rules.filter((r) => r.language === "ru").length, 18);
-    assert.equal(checker.rules.filter((r) => r.language === "en").length, 9);
+    assert.equal(checker.rules.length, 39);
+    assert.equal(checker.rules.filter((r) => r.language === "ru").length, 28);
+    assert.equal(checker.rules.filter((r) => r.language === "en").length, 11);
     for (const rule of checker.rules) {
         assert.ok(rule.title.length > 0);
     }
@@ -48,7 +49,23 @@ test("empty and clean input", async () => {
 test("repeated checks reuse the instance", async () => {
     const checker = await createChecker();
     for (let i = 0; i < 100; i++) {
-        assert.equal(checker.check("очень интересно").length, 1);
+        assert.equal(checker.check("очень интересно").length, 2);
     }
+    checker.destroy();
+});
+
+test("punctuation rules: repeated marks and parentheses", async () => {
+    const checker = await createChecker();
+    const bang = "Приходите завтра!! Обсудим";
+    let issues = checker.check(bang);
+    assert.equal(issues.length, 1);
+    assert.equal(bang.slice(issues[0].start, issues[0].end), "!!");
+    assert.equal(issues[0].rule.title, "Слишком эмоционально");
+
+    const paren = "Дошли (наконец) до дома";
+    issues = checker.check(paren);
+    assert.equal(issues.length, 1);
+    assert.equal(paren.slice(issues[0].start, issues[0].end), "(наконец)");
+    assert.equal(issues[0].rule.title, "Текст в скобках");
     checker.destroy();
 });

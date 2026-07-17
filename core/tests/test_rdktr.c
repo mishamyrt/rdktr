@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "rdktr.h"
+#include "../src/rdktr_internal.h"
 
 static int checks = 0;
 static int failures = 0;
@@ -68,8 +69,9 @@ static void expect_total(const char *text, size_t want, const char *func, int li
 /* ---- tests ---------------------------------------------------------------- */
 
 static void test_exact_words_and_phrases(void) {
-    EXPECT_TOTAL("Это очень важно", 1);
+    EXPECT_TOTAL("Это очень важно", 2);
     EXPECT("Это очень важно", 0, "очень", "Усилители");
+    EXPECT("Это очень важно", 1, "важно", "Необъективная оценка");
     EXPECT("Нельзя не отметить рост", 0, "Нельзя не отметить", "Канцеляризм");
     EXPECT_TOTAL("Кошка спит на подоконнике.", 0);
 }
@@ -90,10 +92,10 @@ static void test_phrase_gaps(void) {
 static void test_declensions(void) {
     EXPECT("данного", 0, "данного", "Канцеляризм");
     EXPECT("в данных обстоятельствах", 0, "данных", "Канцеляризм");
-    EXPECT("существовали", 0, "существовали", "Слабый глагол");
-    /* morphology expansion inside phrases */
-    EXPECT("они принимали участие", 0, "принимали участие", "Газетный штамп");
-    EXPECT("он примет участие", 0, "примет участие", "Газетный штамп");
+    EXPECT("существует мнение", 0, "существует", "Слабый глагол");
+    /* morphology expansion inside phrases (pronouns match separately) */
+    EXPECT("они принимали участие", 1, "принимали участие", "Газетный штамп");
+    EXPECT("он примет участие", 1, "примет участие", "Газетный штамп");
 }
 
 static void test_prefixes(void) {
@@ -101,8 +103,10 @@ static void test_prefixes(void) {
            "Необъективная оценка");
     EXPECT("we utilized the API", 0, "utilized", "Officialese");
     /* the stem alone is not a prefix match: needs at least one more letter */
-    EXPECT_TOTAL("пресловут", 0);
     EXPECT_TOTAL("we utiliz it", 0);
+    /* "пресловут" is a short-adjective form of ~пресловутый (lexeme, not
+     * prefix), so it does match as a whole word */
+    EXPECT("пресловут", 0, "пресловут", "Бытовой штамп");
 }
 
 static void test_prefixes_in_phrases(void) {
@@ -122,17 +126,24 @@ static void test_gaps(void) {
     EXPECT("в лучших традициях", 0, "в лучших традициях", "Газетный штамп");
     EXPECT("в лучших боевых традициях", 0, "в лучших боевых традициях",
            "Газетный штамп");
-    EXPECT_TOTAL("в лучших самых боевых традициях", 0); /* gap max is 1 */
+    /* gap max is 1: the phrase does not fire, only standalone words do */
+    EXPECT("в лучших самых боевых традициях", 0, "лучших",
+           "Необъективная оценка");
+    EXPECT("в лучших самых боевых традициях", 1, "самых", "Усилители");
     /* rule is "в _ жизни": the gap word may be unknown to the dictionary */
     EXPECT("в чужой жизни", 0, "в чужой жизни", "Газетный штамп");
     EXPECT_TOTAL("в жизни", 0);            /* gap needs exactly one word */
-    EXPECT_TOTAL("в лучших, традициях", 0); /* punctuation breaks the gap */
+    /* punctuation breaks the gap: only the standalone word fires */
+    EXPECT("в лучших, традициях", 0, "лучших", "Необъективная оценка");
+    EXPECT_TOTAL("в лучших, традициях", 1);
 }
 
 static void test_punct_in_patterns(void) {
     /* rule is "все знают, что": the comma must be present in the text */
     EXPECT("все знают, что это", 0, "все знают, что", "Газетный штамп");
-    EXPECT_TOTAL("все знают что это", 0);
+    /* without the comma the phrase dies; "все" alone is a generalization */
+    EXPECT("все знают что это", 0, "все", "Обощение");
+    EXPECT_TOTAL("все знают что это", 1);
     /* rule is "казалось,": trailing comma is part of the match */
     EXPECT("казалось, дождь", 0, "казалось,", "Газетный штамп");
     EXPECT_TOTAL("казалось солнце", 0);
@@ -145,7 +156,8 @@ static void test_alternatives(void) {
 }
 
 static void test_word_boundaries(void) {
-    EXPECT_TOTAL("выше", 0);   /* not "вы" */
+    /* the whole word matches (~высокий), never the prefix "вы" */
+    EXPECT("выше", 0, "выше", "Необъективная оценка");
     EXPECT_TOTAL("яблоня", 0); /* not "я" */
     EXPECT("я пошёл", 0, "я", "Личное местоимение");
     EXPECT_TOTAL("во-первых", 0); /* hyphenated word is one token */
@@ -165,6 +177,35 @@ static void test_comma_rule(void) {
     EXPECT_TOTAL("раз, два и три.", 0);
 }
 
+static void test_exclamation_runs(void) {
+    /* rule is "!(2+)": two or more exclamation marks in a row */
+    EXPECT("Приходите завтра!! Обсудим", 0, "!!", "Слишком эмоционально");
+    /* greedy: the whole run is one match */
+    EXPECT("Приходите завтра!!! Обсудим", 0, "!!!", "Слишком эмоционально");
+    EXPECT_TOTAL("Приходите завтра! Обсудим", 0);
+    /* a word between the marks breaks the run */
+    EXPECT_TOTAL("Приходите завтра! Обсудим! Потом", 0);
+    /* per-language: the en rule fires on Latin paragraphs */
+    EXPECT("Come tomorrow!! Sure", 0, "!!", "Too emotional");
+}
+
+static void test_parentheses(void) {
+    /* rule is "\( __ \)": parens with any non-empty content */
+    EXPECT("Дошли (наконец) до дома", 0, "(наконец)", "Текст в скобках");
+    /* inner punctuation, including sentence dots, stays inside */
+    EXPECT("Возьмите гвозди (молоток, шурупы и т. д.) с собой", 0,
+           "(молоток, шурупы и т. д.)", "Текст в скобках");
+    /* two groups are two separate matches */
+    EXPECT_TOTAL("Раз (два) три (четыре) пять", 2);
+    EXPECT("Раз (два) три (четыре) пять", 0, "(два)", "Текст в скобках");
+    EXPECT("Раз (два) три (четыре) пять", 1, "(четыре)", "Текст в скобках");
+    /* an unclosed or empty pair is not a match */
+    EXPECT_TOTAL("Дошли (наконец до дома", 0);
+    EXPECT_TOTAL("Дошли () до дома", 0);
+    EXPECT("The tool (mostly) does the job", 0, "(mostly)",
+           "Parenthetical aside");
+}
+
 static void test_language_detection(void) {
     /* each paragraph is checked in its own language */
     const char *text = "Данный подход работает.\n\nThis is a very good approach.";
@@ -176,7 +217,7 @@ static void test_language_detection(void) {
         CHECK(strcmp(rdktr_multi_rule_lang(M, m[1].rule_id), "en") == 0, "en");
     }
     /* a foreign word inside a paragraph is not checked */
-    EXPECT_TOTAL("Мы сделали это very аккуратно и очень быстро", 2);
+    EXPECT_TOTAL("Мы сделали это very аккуратно и очень быстро", 3);
     /* ambiguous paragraph falls back to the document-dominant language */
     EXPECT("Данный текст написан по-русски.\n\nвы ok", 1, "вы",
            "Личное местоимение");
@@ -188,6 +229,46 @@ static void test_apostrophes(void) {
     EXPECT("don\xE2\x80\x99t miss out", 0, "don\xE2\x80\x99t miss out",
            "Marketing hype"); /* typographic ’ */
     EXPECT("dont miss out", 0, "dont miss out", "Marketing hype");
+}
+
+static void test_lexemes(void) {
+    /* a form shared by several lexeme sets (~он/~оно/~они) matches once */
+    EXPECT_TOTAL("им", 1);
+    EXPECT("им", 0, "им", "Личное местоимение");
+    /* a form in the lexeme sets of two different rules: both fire */
+    EXPECT_TOTAL("большею", 2);
+    EXPECT("большею", 0, "большею", "Необъективная оценка");
+    EXPECT("большею", 1, "большею", "Усилители");
+    /* lexeme × lexeme phrase: form combinations never spelled out in rules */
+    EXPECT("приняла участие", 0, "приняла участие", "Газетный штамп");
+    EXPECT("принимаете участие", 0, "принимаете участие", "Газетный штамп");
+}
+
+static void test_blob_validation(void) {
+    const rdktr_embedded_ruleset *ru = NULL;
+    for (size_t i = 0; i < rdktr_embedded_ruleset_count; i++)
+        if (strcmp(rdktr_embedded_rulesets[i].lang, "ru") == 0)
+            ru = &rdktr_embedded_rulesets[i];
+    CHECK(ru != NULL, "ru embedded ruleset present");
+    if (!ru) return;
+
+    uint8_t *buf = malloc(ru->size); /* malloc is at least 4-byte aligned */
+    if (!buf) return;
+    memcpy(buf, ru->data, ru->size);
+    rdktr_engine *e = rdktr_create(buf, ru->size);
+    CHECK(e != NULL, "pristine blob copy loads");
+    rdktr_destroy(e);
+
+    buf[4] ^= 0xFF; /* wrong version */
+    CHECK(rdktr_create(buf, ru->size) == NULL, "wrong version rejected");
+    buf[4] ^= 0xFF;
+
+    CHECK(rdktr_create(buf, ru->size / 2) == NULL, "truncated blob rejected");
+
+    memset(buf + 96, 0xFF, 4); /* inflated lexeme_count */
+    CHECK(rdktr_create(buf, ru->size) == NULL, "bad lexeme_count rejected");
+
+    free(buf);
 }
 
 static void test_single_language_engines(void) {
@@ -229,7 +310,7 @@ static void test_api_contract(void) {
 
     /* rule metadata is reachable through global ids */
     uint32_t rules = rdktr_multi_rule_count(M);
-    CHECK(rules == 27, "27 embedded rules, got %u", rules);
+    CHECK(rules == 39, "39 embedded rules, got %u", rules);
     for (uint32_t i = 0; i < rules; i++) {
         CHECK(rdktr_multi_rule_title(M, i) != NULL, "title %u", i);
         CHECK(rdktr_multi_rule_lang(M, i) != NULL, "lang %u", i);
@@ -254,8 +335,12 @@ int main(void) {
     test_word_boundaries();
     test_overlaps();
     test_comma_rule();
+    test_exclamation_runs();
+    test_parentheses();
     test_language_detection();
     test_apostrophes();
+    test_lexemes();
+    test_blob_validation();
     test_single_language_engines();
     test_api_contract();
     rdktr_multi_destroy(M);

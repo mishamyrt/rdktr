@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rdktr rules compiler.
+r"""rdktr rules compiler.
 
 Reads rule files (rules/<lang>/*.md), expands markers and builds one binary
 blob per language: a double-array trie (exact words + prefix stems) and a
@@ -20,6 +20,12 @@ Pattern line syntax (see rules/README.md):
     этот _(2) гвоздь     gap: exactly two arbitrary words
     этот _(0-3) гвоздь   gap: zero to three arbitrary words
     казалось,            ',' must appear in the text at this position
+    !                    a standalone punctuation char is matched literally;
+                         escape syntax chars with a backslash: \( \) \? \[
+    !(2+)                punctuation repeat: 2 or more in a row; also
+                         !(2) exactly two, !(2-5) two to five
+    \( __ \)             `__` wide gap: 1+ words and/or punctuation, lazily
+                         up to the next pattern element (max 32 items)
     _, _, _, _, _, _     special structural rule: too many commas in a sentence
 
 Usage:

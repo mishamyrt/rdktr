@@ -7,11 +7,13 @@
 #include "rdktr.h"
 
 #define RDKTR_NONE 0xFFFFFFFFu
+#define RDKTR_NONE16 0xFFFFu
 
-/* Blob layout: fixed 112-byte header followed by 4-byte aligned sections.
- * All integers are little-endian u32. Produced by scripts/compile_rules.py. */
-#define RDKTR_HEADER_SIZE 112
-#define RDKTR_VERSION 3
+/* Blob layout: fixed 128-byte header (little-endian u32 fields) followed by
+ * 4-byte aligned sections. Data arrays are u16 except the rules table.
+ * Produced by scripts/compile_rules.py. */
+#define RDKTR_HEADER_SIZE 136
+#define RDKTR_VERSION 5
 
 typedef struct {
     uint32_t title_off; /* into string pool */
@@ -21,29 +23,33 @@ typedef struct {
 
 /* A pattern is a sequence of elements matched against the token stream. */
 enum {
-    RDKTR_ELEM_WORD = 0,   /* a = word id (exact match) */
-    RDKTR_ELEM_PREFIX = 1, /* a = prefix id (stem + at least one letter) */
-    RDKTR_ELEM_GAP = 2,    /* a..b arbitrary words */
-    RDKTR_ELEM_PUNCT = 3   /* a = punctuation codepoint, e.g. ',' */
+    RDKTR_ELEM_WORD = 0,      /* a = word id (exact match) */
+    RDKTR_ELEM_PREFIX = 1,    /* a = prefix id (stem + at least one letter) */
+    RDKTR_ELEM_GAP = 2,       /* a..b arbitrary words */
+    RDKTR_ELEM_PUNCT = 3,     /* a = punctuation codepoint (BMP), e.g. ',' */
+    RDKTR_ELEM_LEXEME = 4,    /* a = lexeme set id (any inflected form) */
+    RDKTR_ELEM_PUNCT_RUN = 5, /* a = codepoint; b = min | max << 8, max 0 = inf */
+    RDKTR_ELEM_ANY = 6        /* a..b arbitrary words and/or punctuation, lazy */
 };
 
 typedef struct {
-    uint32_t kind;
-    uint32_t a;
-    uint32_t b;
+    uint16_t kind;
+    uint16_t a;
+    uint16_t b;
 } rdktr_elem;
 
 typedef struct {
-    uint32_t elem_start; /* into elems array */
-    uint32_t elem_count;
-    uint32_t rules_start; /* into pat_rules array */
-    uint32_t rules_count;
+    uint16_t elem_start; /* into elems array */
+    uint16_t elem_count;
+    uint16_t rules_start; /* into pat_rules array */
+    uint16_t rules_count;
 } rdktr_pattern_entry;
 
-/* Slice of start_list: patterns whose first element is a given word/prefix. */
+/* Slice of start_list: patterns whose first element is a given word/prefix.
+ * Reused for lexeme_index (slice of lexeme_words). */
 typedef struct {
-    uint32_t start;
-    uint32_t count;
+    uint16_t start;
+    uint16_t count;
 } rdktr_start_index;
 
 struct rdktr_engine {
@@ -57,16 +63,16 @@ struct rdktr_engine {
 
     /* word dictionary: double-array trie over normalized UTF-8 bytes */
     uint32_t dat_size;
-    const uint32_t *dat_base;
-    const uint32_t *dat_check;
-    const uint32_t *dat_word_id;   /* exact-word terminal -> word id */
-    const uint32_t *dat_prefix_id; /* prefix terminal -> prefix id */
+    const uint16_t *dat_base;
+    const uint16_t *dat_check;
+    const uint16_t *dat_word_id;   /* exact-word terminal -> word id */
+    const uint16_t *dat_prefix_id; /* prefix terminal -> prefix id */
     uint32_t word_count;
     uint32_t prefix_count;
 
     uint32_t pat_count;
     const rdktr_pattern_entry *pats;
-    const uint32_t *pat_rules;
+    const uint16_t *pat_rules;
     uint32_t pat_rules_count;
     const rdktr_elem *elems;
     uint32_t elem_count;
@@ -74,8 +80,18 @@ struct rdktr_engine {
     /* pattern start index by first element */
     const rdktr_start_index *word_index;   /* word_count entries */
     const rdktr_start_index *prefix_index; /* prefix_count entries */
-    const uint32_t *start_list;            /* pattern ids */
+    const uint16_t *start_list;            /* pattern ids */
     uint32_t start_list_count;
+
+    /* lexeme sets: sorted word-id slices, referenced by ELEM_LEXEME */
+    uint32_t lexeme_count;
+    const rdktr_start_index *lexeme_index; /* lexeme_count entries */
+    const uint16_t *lexeme_words;          /* ascending word ids per set */
+    uint32_t lexeme_words_count;
+
+    /* patterns whose first element is punctuation; scanned per punct char */
+    const uint16_t *punct_start;
+    uint32_t punct_start_count;
 
     uint32_t max_phrase_len; /* max pattern span in tokens (sanity bound) */
     uint32_t comma_rule_id;  /* RDKTR_NONE when disabled */

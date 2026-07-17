@@ -149,12 +149,31 @@ static int prefix_hit(const uint32_t *hits, int n, uint32_t prefix_id) {
     return 0;
 }
 
-/* Does a word/prefix element accept the current token? */
-static int elem_takes_token(const rdktr_elem *el, uint32_t word_id,
-                            const uint32_t *hits, int n_hits) {
+/* Is word_id a member of the lexeme set? Sets are sorted ascending. */
+static int lexeme_has_word(const rdktr_engine *e, uint32_t lexeme_id,
+                           uint32_t word_id) {
+    const rdktr_start_index *lx = &e->lexeme_index[lexeme_id];
+    uint32_t lo = 0, hi = lx->count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        uint32_t w = e->lexeme_words[lx->start + mid];
+        if (w == word_id) return 1;
+        if (w < word_id)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return 0;
+}
+
+/* Does a word/prefix/lexeme element accept the current token? */
+static int elem_takes_token(const rdktr_engine *e, const rdktr_elem *el,
+                            uint32_t word_id, const uint32_t *hits, int n_hits) {
     if (el->kind == RDKTR_ELEM_WORD)
-        return word_id != RDKTR_NONE && el->a == word_id;
+        return word_id != RDKTR_NONE16 && el->a == word_id;
     if (el->kind == RDKTR_ELEM_PREFIX) return prefix_hit(hits, n_hits, el->a);
+    if (el->kind == RDKTR_ELEM_LEXEME)
+        return word_id != RDKTR_NONE16 && lexeme_has_word(e, el->a, word_id);
     return 0;
 }
 
@@ -186,19 +205,26 @@ static void partials_on_token(const rdktr_engine *e, partial_set *set,
             /* gap satisfied: the element after it may take this token
              * (a gap is never the last element) */
             if (p->gap >= el->a &&
-                elem_takes_token(el + 1, word_id, hits, n_hits))
+                elem_takes_token(e, el + 1, word_id, hits, n_hits))
                 partial_advance(e, &next, out, p, p->elem + 2, tok_end);
             /* the token may extend the gap */
             if (p->gap + 1 <= el->b)
                 partial_push(&next, p->pat, p->elem, p->gap + 1, p->start);
-        } else if (elem_takes_token(el, word_id, hits, n_hits)) {
+        } else if (el->kind == RDKTR_ELEM_ANY) {
+            /* lazy: the follower wins over extending (never the last elem) */
+            if (p->gap >= el->a &&
+                elem_takes_token(e, el + 1, word_id, hits, n_hits))
+                partial_advance(e, &next, out, p, p->elem + 2, tok_end);
+            else if (p->gap + 1 <= el->b)
+                partial_push(&next, p->pat, p->elem, p->gap + 1, p->start);
+        } else if (elem_takes_token(e, el, word_id, hits, n_hits)) {
             partial_advance(e, &next, out, p, p->elem + 1, tok_end);
         }
         /* expected punctuation or a mismatch: the partial dies */
     }
 
     /* spawn partials whose first element matches this token */
-    if (word_id != RDKTR_NONE) {
+    if (word_id != RDKTR_NONE16) {
         const rdktr_start_index *si = &e->word_index[word_id];
         for (uint32_t k = 0; k < si->count; k++) {
             uint32_t pid = e->start_list[si->start + k];
@@ -218,10 +244,27 @@ static void partials_on_token(const rdktr_engine *e, partial_set *set,
     *set = next;
 }
 
-/* Advance partials over a punctuation codepoint ending at `end`. Partials
- * that do not expect this punctuation die (punctuation breaks phrases). */
+/* One matched punctuation char of a run: emit/advance when the count is in
+ * range, stay in the run while below the max. `elem` is the run's index in
+ * the pattern, `count` the chars matched so far including this one. */
+static void punct_run_step(const rdktr_engine *e, partial_set *next,
+                           match_vec *out, const rdktr_partial *p,
+                           uint32_t elem, uint32_t count, uint32_t end) {
+    const rdktr_pattern_entry *pat = &e->pats[p->pat];
+    const rdktr_elem *el = &e->elems[pat->elem_start + elem];
+    uint32_t mn = el->b & 0xFF, mx = el->b >> 8; /* mx 0 = unbounded */
+    if (count >= mn && (mx == 0 || count <= mx))
+        partial_advance(e, next, out, p, elem + 1, end);
+    if (mx == 0 || count < mx)
+        partial_push(next, p->pat, elem, count, p->start);
+}
+
+/* Advance partials over a punctuation codepoint [start, end). Partials that
+ * do not expect this punctuation die (punctuation breaks phrases), except
+ * `__` which swallows anything up to its follower. */
 static void partials_on_punct(const rdktr_engine *e, partial_set *set,
-                              match_vec *out, uint32_t cp, uint32_t end) {
+                              match_vec *out, uint32_t cp, uint32_t start,
+                              uint32_t end) {
     partial_set next;
     next.n = 0;
 
@@ -231,10 +274,31 @@ static void partials_on_punct(const rdktr_engine *e, partial_set *set,
         const rdktr_elem *el = &e->elems[pat->elem_start + p->elem];
         if (el->kind == RDKTR_ELEM_PUNCT && el->a == cp) {
             partial_advance(e, &next, out, p, p->elem + 1, end);
+        } else if (el->kind == RDKTR_ELEM_PUNCT_RUN && el->a == cp) {
+            punct_run_step(e, &next, out, p, p->elem, p->gap + 1, end);
         } else if (el->kind == RDKTR_ELEM_GAP && p->gap >= el->a &&
                    el[1].kind == RDKTR_ELEM_PUNCT && el[1].a == cp) {
             partial_advance(e, &next, out, p, p->elem + 2, end);
+        } else if (el->kind == RDKTR_ELEM_ANY) {
+            /* lazy: a matching follower closes `__`, else the char extends it */
+            if (p->gap >= el->a && el[1].kind == RDKTR_ELEM_PUNCT &&
+                el[1].a == cp)
+                partial_advance(e, &next, out, p, p->elem + 2, end);
+            else if (p->gap + 1 <= el->b)
+                partial_push(&next, p->pat, p->elem, p->gap + 1, p->start);
         }
+    }
+
+    /* spawn partials whose first element matches this punctuation char */
+    for (uint32_t k = 0; k < e->punct_start_count; k++) {
+        uint32_t pid = e->punct_start[k];
+        const rdktr_elem *el = &e->elems[e->pats[pid].elem_start];
+        if (el->a != cp) continue;
+        rdktr_partial fresh = {pid, 0, 0, start};
+        if (el->kind == RDKTR_ELEM_PUNCT)
+            partial_advance(e, &next, out, &fresh, 1, end);
+        else /* RDKTR_ELEM_PUNCT_RUN */
+            punct_run_step(e, &next, out, &fresh, 0, 1, end);
     }
 
     *set = next;
@@ -312,7 +376,8 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
 
         if (!is_word_core(cp)) {
             if (!is_space_cp(cp))
-                partials_on_punct(e, &parts, &words, cp, (uint32_t)(i + cplen));
+                partials_on_punct(e, &parts, &words, cp, (uint32_t)i,
+                                  (uint32_t)(i + cplen));
             if (cp == ',') commas++;
             if (is_sentence_end(cp)) {
                 if (e->comma_rule_id != RDKTR_NONE && sent_has_text &&
@@ -365,7 +430,7 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
                         break;
                     }
                 }
-                if (alive && e->dat_prefix_id[dat] != RDKTR_NONE &&
+                if (alive && e->dat_prefix_id[dat] != RDKTR_NONE16 &&
                     n_prefix < (int)(sizeof(prefix_hits) / sizeof(prefix_hits[0]))) {
                     prefix_hits[n_prefix] = e->dat_prefix_id[dat];
                     prefix_hit_end[n_prefix] = i + cplen;
@@ -380,7 +445,7 @@ size_t rdktr_check_alloc(const rdktr_engine *e, const char *utf8, size_t len,
          * consumed the whole token is the stem itself, not a prefix match */
         if (n_prefix > 0 && prefix_hit_end[n_prefix - 1] == tok_end) n_prefix--;
 
-        uint32_t word_id = alive ? e->dat_word_id[dat] : RDKTR_NONE;
+        uint32_t word_id = alive ? e->dat_word_id[dat] : RDKTR_NONE16;
 
         partials_on_token(e, &parts, &words, word_id, prefix_hits, n_prefix,
                           (uint32_t)tok_start, (uint32_t)tok_end);
