@@ -26,7 +26,7 @@ binding-swift-test:
 
 .PHONY: publish
 publish:
-	@sed -E 's/^"version": "[^"]+"/"version": "${VERSION}"/' bindings/js/package.json > bindings/js/package.json.tmp
+	@sed -E 's/"version": "[^"]+"/"version": "${VERSION}"/' bindings/js/package.json > bindings/js/package.json.tmp
 	@mv bindings/js/package.json.tmp bindings/js/package.json
 	@git add \
 		Makefile \
