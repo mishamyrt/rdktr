@@ -40,7 +40,8 @@ The wasm module is prebuilt. To rebuild it from the C core you need
 [zig](https://ziglang.org) (bundles clang + lld + wasi-libc):
 
 ```sh
-./build.sh && npm test
+npm run build
+npm run test
 ```
 
 Rules are Markdown files compiled ahead of time; see the monorepo root for
