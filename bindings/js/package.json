@@ -1,6 +1,6 @@
 {
     "name": "rdktr",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Fast stop-word / text-cleanliness checker",
     "repository": {
       "url": "https://github.com/mishamyrt/rdktr"
