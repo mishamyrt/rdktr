@@ -1,7 +1,7 @@
 {
     "name": "rdktr",
     "version": "0.1.0",
-    "description": "Fast stop-word / text-cleanliness checker. WASM build of the C core, zero dependencies.",
+    "description": "Fast stop-word / text-cleanliness checker",
     "type": "module",
     "main": "src/index.js",
     "types": "src/index.d.ts",
@@ -17,7 +17,7 @@
         "dist"
     ],
     "scripts": {
-        "build": "./build.sh",
+        "build": "./scripts/build.sh",
         "test": "node --test"
     },
     "keywords": [

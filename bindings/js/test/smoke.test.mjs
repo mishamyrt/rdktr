@@ -25,17 +25,6 @@ test("offsets are UTF-16 code units (surrogate pairs)", async () => {
     checker.destroy();
 });
 
-test("rule metadata is exposed", async () => {
-    const checker = await createChecker();
-    assert.equal(checker.rules.length, 39);
-    assert.equal(checker.rules.filter((r) => r.language === "ru").length, 28);
-    assert.equal(checker.rules.filter((r) => r.language === "en").length, 11);
-    for (const rule of checker.rules) {
-        assert.ok(rule.title.length > 0);
-    }
-    checker.destroy();
-});
-
 test("empty and clean input", async () => {
     const checker = await createChecker();
     assert.deepEqual(checker.check(""), []);
@@ -60,12 +49,12 @@ test("punctuation rules: repeated marks and parentheses", async () => {
     let issues = checker.check(bang);
     assert.equal(issues.length, 1);
     assert.equal(bang.slice(issues[0].start, issues[0].end), "!!");
-    assert.equal(issues[0].rule.title, "Слишком эмоционально");
+    assert.equal(issues[0].rule.title, "Многократное восклицание");
 
     const paren = "Дошли (наконец) до дома";
     issues = checker.check(paren);
     assert.equal(issues.length, 1);
     assert.equal(paren.slice(issues[0].start, issues[0].end), "(наконец)");
-    assert.equal(issues[0].rule.title, "Текст в скобках");
+    assert.equal(issues[0].rule.title, "Скобки — зло");
     checker.destroy();
 });

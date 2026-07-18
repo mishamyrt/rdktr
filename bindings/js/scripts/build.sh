@@ -2,7 +2,7 @@
 # Builds the rdktr core into a standalone WebAssembly module.
 # Requires zig (bundles clang + lld + wasi-libc): https://ziglang.org
 set -eu
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 mkdir -p dist
 
 CORE=../../core

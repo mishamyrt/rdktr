@@ -1,12 +1,35 @@
+export type Address = number;
+
+declare const multiPtrBrand: unique symbol;
+export type MultiPtr = number & { readonly [multiPtrBrand]: 'wasm-ptr' };
+
+declare const stringPtrBrand: unique symbol;
+export type StringPtr = number & { readonly [stringPtrBrand]: 'wasm-ptr' };
+
+export interface CoreExports {
+  rdktr_multi_create_default(): MultiPtr;
+  rdktr_multi_rule_count(multi: MultiPtr): number;
+  rdktr_multi_rule_lang(multi: MultiPtr, index: number): StringPtr;
+  rdktr_multi_rule_title(multi: MultiPtr, index: number): StringPtr;
+  rdktr_multi_rule_description(multi: MultiPtr, index: number): StringPtr;
+  rdktr_multi_rule_weight(multi: MultiPtr, index: number): number;
+  rdktr_multi_check(multi: MultiPtr, text: Address, length: number, match: Address, count: number): number;
+  rdktr_multi_destroy(multi: MultiPtr): void;
+  malloc(size: number): Address;
+  free(ptr: Address): void;
+  memory: WebAssembly.Memory;
+  _initialize(): void;
+}
+
 /** A stop-word rule from the embedded rule set. */
-export interface Rule {
+export type Rule = Readonly<{
     readonly id: number;
     /** Language of the rule set, e.g. "ru" or "en". */
     readonly language: string;
     readonly title: string;
     readonly hint: string;
     readonly weight: number;
-}
+}>
 
 /** A single finding. Offsets are UTF-16 code unit indices into the checked
  * string, directly usable with String.prototype.slice(). */
