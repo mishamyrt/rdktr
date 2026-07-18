@@ -33,53 +33,89 @@ class Trie:
         self.prefix_id[node] = pid
 
     def build_double_array(self) -> tuple[list[int], list[int], list[int], list[int]]:
-        """Returns (base, check, wid, pfx) arrays. Slot 0 is the root."""
+        """Returns (base, check, wid, pfx) arrays. Slot 0 is the root.
+
+        Free slots are kept in a doubly-linked list so the base search only
+        probes free slots; a plain linear scan degrades quadratically here
+        because multibyte UTF-8 leaves the low slots permanently free.
+        """
         size = 1024
         base = [0] * size
         check = [NONE] * size
         wid = [NONE] * size
         pfx = [NONE] * size
+        # free list over slots [1, size); `size` acts as the end sentinel,
+        # prv of the head is -1
+        nxt = list(range(1, size + 1))
+        prv = list(range(-1, size - 1))
+        head = 1
+        prv[1] = -1
+        tail = size - 1
 
-        def ensure(n: int) -> None:
-            nonlocal size
-            while size < n:
-                size *= 2
-            while len(base) < size:
-                base.append(0)
-                check.append(NONE)
-                wid.append(NONE)
-                pfx.append(NONE)
+        def grow() -> None:
+            nonlocal size, head, tail
+            old = size
+            size *= 2
+            base.extend([0] * old)
+            check.extend([NONE] * old)
+            wid.extend([NONE] * old)
+            pfx.extend([NONE] * old)
+            nxt.extend(range(old + 1, size + 1))
+            prv.extend(range(old - 1, size - 1))
+            if head == old:  # list was empty
+                prv[old] = -1
+            else:
+                nxt[tail] = old
+                prv[old] = tail
+            tail = size - 1
+
+        def occupy(t: int) -> None:
+            nonlocal head, tail
+            p, q = prv[t], nxt[t]
+            if p == -1:
+                head = q
+            else:
+                nxt[p] = q
+            if q < size:
+                prv[q] = p
+            else:
+                tail = p
 
         slot_of = {0: 0}
         wid[0] = self.word_id[0]
         pfx[0] = self.prefix_id[0]
-        search_hint = 1
         queue = [0]
-        while queue:
-            node = queue.pop(0)
+        qi = 0
+        while qi < len(queue):
+            node = queue[qi]
+            qi += 1
             kids = self.children[node]
             if not kids:
                 continue
             bytes_ = sorted(kids.keys())
+            first = bytes_[0]
+            rest = bytes_[1:]
             s = slot_of[node]
-            b = max(1, search_hint - bytes_[0])
+            t = head
             while True:
-                ensure(b + 256 + 1)
-                if all(check[b + c] == NONE for c in bytes_):
+                if t >= size:
+                    grow()
+                while size <= t + 256 + 1:
+                    grow()
+                b = t - first
+                if b >= 1 and all(check[b + c] == NONE for c in rest):
                     break
-                b += 1
+                t = nxt[t]
             base[s] = b
             for c in bytes_:
                 t = b + c
                 child = kids[c]
+                occupy(t)
                 check[t] = s
                 wid[t] = self.word_id[child]
                 pfx[t] = self.prefix_id[child]
                 slot_of[child] = t
                 queue.append(child)
-            # advance hint past fully occupied region
-            while search_hint < size and check[search_hint] != NONE:
-                search_hint += 1
         used = max((i for i in range(size) if check[i] != NONE), default=0)
         n = used + 1
         return base[:n], check[:n], wid[:n], pfx[:n]
