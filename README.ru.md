@@ -5,8 +5,8 @@
 <h1 align="center">rdktr</h1>
 
 <p align="center">
-  <a href="https://github.com/mishamyrt/rdktr/actions/workflows/qa.yml">
-    <img src="https://github.com/mishamyrt/rdktr/actions/workflows/qa.yml/badge.svg" />
+  <a href="https://github.com/mishamyrt/rdktr/actions/workflows/qa.yaml">
+    <img src="https://github.com/mishamyrt/rdktr/actions/workflows/qa.yaml/badge.svg" />
   </a>
 </p>
 
