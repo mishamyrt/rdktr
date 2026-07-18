@@ -31,7 +31,7 @@ clean:
 	rm -rf "$(TARGET_DIR)"
 	rm -rf "$(PYTHON_VENV_DIR)"
 
-$(RULES_DATA): $(RULES_SRC)
+$(RULES_DATA): $(PYTHON_VENV_DIR) $(RULES_SRC)
 	uv run scripts/compile_rules.py --rules ./rules  --out-c $@
 
 $(PYTHON_VENV_DIR): requirements.txt
