@@ -1,7 +1,7 @@
 # rdktr
 
 Fast stop-word / text-cleanliness checker ("Glavred"-style) for Russian and
-English. A WebAssembly build of a C core — zero dependencies, ~170 KB wasm
+English. A WebAssembly build of a C core — zero dependencies, less then 400 KB wasm
 (rules included), works in browsers and Node.
 
 The language is detected automatically per paragraph (Cyrillic vs Latin
