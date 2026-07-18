@@ -1,4 +1,15 @@
-# rdktr
+<p align="center">
+    <img src="./docs/logo.svg" width="50px" />
+</p>
+
+<h1 align="center">rdktr</h1>
+
+<p align="center">
+  <a href="https://github.com/mishamyrt/rdktr/actions/workflows/ci.yml">
+    <img src="https://github.com/mishamyrt/rdktr/actions/workflows/ci.yml/badge.svg" />
+  </a>
+</p>
+
 
 An engine and rule set for checking text for verbal clutter. Inspired by "[Glavred](https://glvrd.ru)".
 

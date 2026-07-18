@@ -1,4 +1,15 @@
-# rdktr
+<p align="center">
+    <img src="./docs/logo.svg" width="50px" />
+</p>
+
+<h1 align="center">rdktr</h1>
+
+<p align="center">
+  <a href="https://github.com/mishamyrt/rdktr/actions/workflows/ci.yml">
+    <img src="https://github.com/mishamyrt/rdktr/actions/workflows/ci.yml/badge.svg" />
+  </a>
+</p>
+
 
 Движок и набор правил для проверки текста на наличие словесного мусора. Вдохновлён «[Главредом](https://glvrd.ru)».
 
