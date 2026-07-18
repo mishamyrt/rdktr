@@ -179,9 +179,9 @@ static void test_comma_rule(void) {
 
 static void test_exclamation_runs(void) {
     /* rule is "!(2+)": two or more exclamation marks in a row */
-    EXPECT("Приходите завтра!! Обсудим", 0, "!!", "Слишком эмоционально");
+    EXPECT("Приходите завтра!! Обсудим", 0, "!!", "Многократное восклицание");
     /* greedy: the whole run is one match */
-    EXPECT("Приходите завтра!!! Обсудим", 0, "!!!", "Слишком эмоционально");
+    EXPECT("Приходите завтра!!! Обсудим", 0, "!!!", "Многократное восклицание");
     EXPECT_TOTAL("Приходите завтра! Обсудим", 0);
     /* a word between the marks breaks the run */
     EXPECT_TOTAL("Приходите завтра! Обсудим! Потом", 0);
@@ -191,14 +191,14 @@ static void test_exclamation_runs(void) {
 
 static void test_parentheses(void) {
     /* rule is "\( __ \)": parens with any non-empty content */
-    EXPECT("Дошли (наконец) до дома", 0, "(наконец)", "Текст в скобках");
+    EXPECT("Дошли (наконец) до дома", 0, "(наконец)", "Скобки — зло");
     /* inner punctuation, including sentence dots, stays inside */
     EXPECT("Возьмите гвозди (молоток, шурупы и т. д.) с собой", 0,
-           "(молоток, шурупы и т. д.)", "Текст в скобках");
+           "(молоток, шурупы и т. д.)", "Скобки — зло");
     /* two groups are two separate matches */
     EXPECT_TOTAL("Раз (два) три (четыре) пять", 2);
-    EXPECT("Раз (два) три (четыре) пять", 0, "(два)", "Текст в скобках");
-    EXPECT("Раз (два) три (четыре) пять", 1, "(четыре)", "Текст в скобках");
+    EXPECT("Раз (два) три (четыре) пять", 0, "(два)", "Скобки — зло");
+    EXPECT("Раз (два) три (четыре) пять", 1, "(четыре)", "Скобки — зло");
     /* an unclosed or empty pair is not a match */
     EXPECT_TOTAL("Дошли (наконец до дома", 0);
     EXPECT_TOTAL("Дошли () до дома", 0);
@@ -310,7 +310,7 @@ static void test_api_contract(void) {
 
     /* rule metadata is reachable through global ids */
     uint32_t rules = rdktr_multi_rule_count(M);
-    CHECK(rules == 39, "39 embedded rules, got %u", rules);
+    CHECK(rules == 41, "41 embedded rules, got %u", rules);
     for (uint32_t i = 0; i < rules; i++) {
         CHECK(rdktr_multi_rule_title(M, i) != NULL, "title %u", i);
         CHECK(rdktr_multi_rule_lang(M, i) != NULL, "lang %u", i);
