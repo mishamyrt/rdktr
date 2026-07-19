@@ -1,6 +1,6 @@
 ---
 title: Cliché
-description: The reader has seen this a hundred times. Use a concrete image instead
+description: The reader has seen this a hundred times. Use a concrete image instead.
 weight: 100
 ---
 

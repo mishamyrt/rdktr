@@ -1,6 +1,6 @@
 ---
 title: Intensifier
-description: Intensifiers rarely add meaning. Cut them or replace the claim with facts
+description: Intensifiers rarely add meaning. Cut them or replace the claim with facts.
 weight: 50
 ---
 

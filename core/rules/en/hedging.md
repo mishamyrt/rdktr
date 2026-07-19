@@ -1,6 +1,6 @@
 ---
 title: Hedging
-description: Vague qualifiers weaken the claim. Be specific or drop them
+description: Vague qualifiers weaken the claim. Be specific or drop them.
 weight: 50
 ---
 

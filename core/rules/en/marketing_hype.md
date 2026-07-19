@@ -1,6 +1,6 @@
 ---
 title: Marketing hype
-description: Pushy sales language repels readers. Show the value with facts instead
+description: Pushy sales language repels readers. Show the value with facts instead.
 weight: 100
 ---
 

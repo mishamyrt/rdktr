@@ -1,6 +1,6 @@
 ---
 title: Weak verb
-description: Describes a state instead of an action. Replace with a strong verb
+description: Describes a state instead of an action. Replace with a strong verb.
 weight: 50
 ---
 

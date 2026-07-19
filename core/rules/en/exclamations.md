@@ -1,6 +1,6 @@
 ---
 title: Too emotional
-description: One exclamation mark is already loud, several in a row is shouting. Keep one or use a period.
+description: Avoid using more than one exclamation point. The more exclamation points you use, the weaker the effect.
 weight: 0
 ---
 

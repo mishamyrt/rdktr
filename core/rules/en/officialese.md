@@ -1,6 +1,6 @@
 ---
 title: Officialese
-description: Sounds bureaucratic. Say it plainly
+description: Sounds bureaucratic. Say it plainly.
 weight: 100
 ---
 

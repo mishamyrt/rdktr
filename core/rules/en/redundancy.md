@@ -1,6 +1,6 @@
 ---
 title: Redundancy
-description: One of these words already implies the other. Keep one
+description: One of these words already implies the other. Keep one.
 weight: 100
 ---
 

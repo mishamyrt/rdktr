@@ -1,6 +1,6 @@
 ---
 title: Filler phrase
-description: Adds no information. Cut it
+description: Adds no information. Cut it.
 weight: 0
 ---
 

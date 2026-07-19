@@ -1,8 +1,7 @@
 ---
 title: Corporate cliché
 description: >
-  Your competitors say exactly the same. Convince the reader with facts,
-  numbers and examples instead
+  Your competitors say exactly the same. Convince the reader with facts, numbers and examples instead.
 weight: 100
 ---
 
