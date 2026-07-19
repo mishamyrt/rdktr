@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rules_compiler.compiler import Compiler
+from rules_compiler.rule_file import RuleError
 from rules_compiler.constants import (
     ELEM_ANY,
     ELEM_GAP,
@@ -62,6 +63,37 @@ def test_lexeme_single_element(tmp_path: Path) -> None:
     assert [k for k, _, _ in key] == [ELEM_LEXEME]
     assert len(comp.lexeme_sets) == 1
     assert len(comp.lexeme_sets[0]) == 4
+
+
+def test_mid_word_lexeme_keeps_head(tmp_path: Path) -> None:
+    comp = compile_lines(["crm-~гвоздь"], tmp_path)
+    (key,) = comp.pattern_keys
+    assert [k for k, _, _ in key] == [ELEM_LEXEME]
+    words = {w for w, i in comp.word_ids.items() if i in comp.lexeme_sets[0]}
+    assert words == {"crm-гвоздь", "crm-гвоздя", "crm-гвозди", "crm-гвоздей"}
+
+
+def test_mid_word_lexeme_single_form(tmp_path: Path) -> None:
+    comp = compile_lines(["crm-~однако"], tmp_path)
+    (key,) = comp.pattern_keys
+    assert [k for k, _, _ in key] == [ELEM_WORD]
+    assert "crm-однако" in comp.word_ids
+
+
+def test_lint_ignore_marker_is_stripped(tmp_path: Path) -> None:
+    comp = compile_lines(["~гвоздь # lint-ignore: typo"], tmp_path)
+    (key,) = comp.pattern_keys
+    assert [k for k, _, _ in key] == [ELEM_LEXEME]  # no '#' punct, no words
+
+
+def test_double_tilde_is_error(tmp_path: Path) -> None:
+    with pytest.raises(RuleError, match="at most one '~'"):
+        compile_lines(["~гвоздь-~гвоздь"], tmp_path)
+
+
+def test_trailing_tilde_is_error(tmp_path: Path) -> None:
+    with pytest.raises(RuleError, match="must be followed by a word"):
+        compile_lines(["crm-~"], tmp_path)
 
 
 def test_lexeme_phrase_no_product(tmp_path: Path) -> None:
@@ -154,28 +186,28 @@ def test_punct_initial_pattern_in_start_section(tmp_path: Path) -> None:
 
 
 def test_wide_gap_position_errors(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="cannot end with a gap"):
+    with pytest.raises(RuleError, match="cannot end with a gap"):
         compile_lines([r"\( __"], tmp_path)
-    with pytest.raises(SystemExit, match="cannot start with a gap"):
+    with pytest.raises(RuleError, match="cannot start with a gap"):
         compile_lines([r"__ \)"], tmp_path)
-    with pytest.raises(SystemExit, match="adjacent gaps"):
+    with pytest.raises(RuleError, match="adjacent gaps"):
         compile_lines([r"\( __ _ \)"], tmp_path)
 
 
 def test_punct_run_after_gap_rejected(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="cannot follow a gap"):
+    with pytest.raises(RuleError, match="cannot follow a gap"):
         compile_lines(["гвоздь _ !(2+)"], tmp_path)
 
 
 def test_bad_punct_counts(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="bad punctuation count"):
+    with pytest.raises(RuleError, match="bad punctuation count"):
         compile_lines(["!(0+)"], tmp_path)
-    with pytest.raises(SystemExit, match="bad punctuation count"):
+    with pytest.raises(RuleError, match="bad punctuation count"):
         compile_lines(["!(5-2)"], tmp_path)
 
 
 def test_unescaped_metachar_still_errors(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="standalone '\\*'"):
+    with pytest.raises(RuleError, match="standalone '\\*'"):
         compile_lines(["* гвоздь"], tmp_path)
-    with pytest.raises(SystemExit, match="escapes a standalone"):
+    with pytest.raises(RuleError, match="escapes a standalone"):
         compile_lines([r"гво\здь"], tmp_path)

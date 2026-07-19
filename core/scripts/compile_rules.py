@@ -8,35 +8,21 @@ blobs are embedded into the C library as a generated source file.
 
 The implementation lives in the rules_compiler package next to this script.
 
-Pattern line syntax (see rules/README.md):
-    слово или фраза      exact match (case-insensitive, ё == е)
-    ~слово               all inflected forms of the lexeme
-                         (pymorphy3; Russian rules only); works inside phrases
-    основ*               prefix: the stem plus at least one more letter;
-                         works inside phrases
-    [гвоздь|гвозди]      alternatives; inside a word: don['|’]t
-    [в]? слово           '?' right after ']' makes the alternative optional
-    этот _ гвоздь        gap: exactly one arbitrary word
-    этот _(2) гвоздь     gap: exactly two arbitrary words
-    этот _(0-3) гвоздь   gap: zero to three arbitrary words
-    казалось,            ',' must appear in the text at this position
-    !                    a standalone punctuation char is matched literally;
-                         escape syntax chars with a backslash: \( \) \? \[
-    !(2+)                punctuation repeat: 2 or more in a row; also
-                         !(2) exactly two, !(2-5) two to five
-    \( __ \)             `__` wide gap: 1+ words and/or punctuation, lazily
-                         up to the next pattern element (max 32 items)
-    _, _, _, _, _, _     special structural rule: too many commas in a sentence
-
 Usage:
     python3 compile_rules.py [--rules DIR] [--out-c FILE] [--out-bin-dir DIR]
+
+To lint the rules without compiling, use lint_rules.py.
 """
 
 import argparse
 from pathlib import Path
 
+import pymorphy3
+
 from rules_compiler.compiler import Compiler
+from rules_compiler.rule_file import RuleError
 from rules_compiler.serialize import build_blob, emit_c
+
 
 
 def main() -> None:
@@ -59,18 +45,14 @@ def main() -> None:
     blobs: list[tuple[str, bytes]] = []
     for lang_dir in lang_dirs:
         lang = lang_dir.name
-        if lang == "ru" and morph is None:
-            try:
-                import pymorphy3
-            except ImportError:
-                raise SystemExit(
-                    "pymorphy3 is required: pip install -r tools/requirements.txt"
-                )
+        if lang == "ru":
             morph = pymorphy3.MorphAnalyzer()
-
         comp = Compiler(lang, morph if lang == "ru" else None)
         for f in sorted(lang_dir.glob("*.md")):
-            comp.add_rule_file(f)
+            try:
+                comp.add_rule_file(f)
+            except RuleError as e:
+                raise SystemExit(str(e))
         blob = build_blob(comp)
         blobs.append((lang, blob))
 
