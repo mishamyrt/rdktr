@@ -4,6 +4,13 @@ import "./hints.css";
 
 import { Checker, createChecker } from "../../../bindings/js/src/index.js";
 
+// Cache assets for offline use. The SW is only emitted in production builds.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+        navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
+    });
+}
+
 const textEl = document.getElementById("text")!;
 const cardsEl = document.getElementById("cards")!;
 
