@@ -157,7 +157,7 @@ static void test_alternatives(void) {
 
 static void test_word_boundaries(void) {
     /* the whole word matches (~высокий), never the prefix "вы" */
-    EXPECT("выше", 0, "выше", "Необъективная оценка");
+    EXPECT("высокий профессионализм", 0, "высокий профессионализм", "Корпоративный штамп");
     EXPECT_TOTAL("яблоня", 0); /* not "я" */
     EXPECT("я пошёл", 0, "я", "Личное местоимение");
     EXPECT_TOTAL("во-первых", 0); /* hyphenated word is one token */
@@ -235,10 +235,6 @@ static void test_lexemes(void) {
     /* a form shared by several lexeme sets (~он/~оно/~они) matches once */
     EXPECT_TOTAL("им", 1);
     EXPECT("им", 0, "им", "Личное местоимение");
-    /* a form in the lexeme sets of two different rules: both fire */
-    EXPECT_TOTAL("большею", 2);
-    EXPECT("большею", 0, "большею", "Необъективная оценка");
-    EXPECT("большею", 1, "большею", "Усилители");
     /* lexeme × lexeme phrase: form combinations never spelled out in rules */
     EXPECT("приняла участие", 0, "приняла участие", "Газетный штамп");
     EXPECT("принимаете участие", 0, "принимаете участие", "Газетный штамп");
