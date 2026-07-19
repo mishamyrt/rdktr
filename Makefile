@@ -2,11 +2,15 @@ VERSION = 0.1.1
 
 all: core-rules binding-js-build
 
-test: core-test binding-js-test binding-swift-test
+test: core-lint-rules core-test binding-js-test binding-swift-test
 
 .PHONY: core-rules
 core-rules:
 	cd core; make rules-data
+
+.PHONY: core-rules
+core-lint-rules:
+	cd core; make lint-rules
 
 .PHONY: core-test
 core-test: core-rules
