@@ -186,7 +186,7 @@ static void test_exclamation_runs(void) {
     /* a word between the marks breaks the run */
     EXPECT_TOTAL("Приходите завтра! Обсудим! Потом", 0);
     /* per-language: the en rule fires on Latin paragraphs */
-    EXPECT("Come tomorrow!! Sure", 0, "!!", "Too emotional");
+    EXPECT("Come tomorrow!! Sure", 0, "!!", "Repeated exclamation");
 }
 
 static void test_parentheses(void) {
