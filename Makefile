@@ -10,7 +10,7 @@ core-rules:
 
 .PHONY: core-rules
 core-lint-rules:
-	cd core; make lint-rules
+	cd core; make rules-lint
 
 .PHONY: core-test
 core-test: core-rules

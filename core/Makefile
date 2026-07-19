@@ -31,9 +31,12 @@ clean:
 	rm -rf "$(TARGET_DIR)"
 	rm -rf "$(PYTHON_VENV_DIR)"
 
-.PHONY: lint-rules
-lint-rules: $(PYTHON_VENV_DIR)
+.PHONY: rules-lint
+rules-lint: $(PYTHON_VENV_DIR)
 	uv run scripts/lint_rules.py ./rules
+
+.PHONY: rules-build
+rules-build: $(RULES_DATA)
 
 $(RULES_DATA): $(PYTHON_VENV_DIR) $(RULES_SRC)
 	uv run scripts/compile_rules.py --rules ./rules  --out-c $@
