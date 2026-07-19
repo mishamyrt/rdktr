@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2](https://github.com/mishamyrt/rdktr/compare/v0.1.1..v0.1.2) - 2026-07-19
+
+### 🚀 Features
+
+- Format rules description
+- Expand russian rules
+- Regenerate rules
+- Add offline mode for web example
+- Remove extra words, clean up
+
+### 🐛 Bug Fixes
+
+- Correctly name repeated exclamation
+- Add missing rule
+
 ## [0.1.1](https://github.com/mishamyrt/rdktr/compare/..v0.1.1) - 2026-07-18
 
 ### 🚀 Features
