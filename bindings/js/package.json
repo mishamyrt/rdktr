@@ -3,7 +3,7 @@
     "version": "0.1.1",
     "description": "Fast stop-word / text-cleanliness checker",
     "repository": {
-      "url": "https://github.com/mishamyrt/rdktr"
+        "url": "https://github.com/mishamyrt/rdktr"
     },
     "type": "module",
     "main": "src/index.js",
@@ -20,7 +20,8 @@
         "dist"
     ],
     "scripts": {
-        "build": "./scripts/build.sh",
+        "build": "node scripts/build.js dist/rdktr.wasm",
+        "dev": "node scripts/dev.js dist/rdktr.wasm",
         "test": "node --test"
     },
     "keywords": [
@@ -31,5 +32,8 @@
         "plain-language",
         "wasm"
     ],
-    "license": "MIT"
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "^26.1.1"
+    }
 }

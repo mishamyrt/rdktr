@@ -160,7 +160,6 @@ export async function createChecker(source) {
         ? new URL(source, import.meta.url)
         : new URL("../dist/rdktr.wasm", import.meta.url);
     if (url.protocol === "file:") {
-      // @ts-expect-error
       const { readFile } = await import("node:fs/promises");
       module = await WebAssembly.compile(await readFile(url));
     } else {

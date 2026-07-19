@@ -20,6 +20,14 @@ binding-js-test: binding-js-build
 binding-js-build:
 	cd bindings/js; npm run build
 
+.PHONY: binding-js-dev
+binding-js-dev:
+	cd bindings/js; npm run dev
+
+.PHONY: web-dev
+web-dev:
+	cd examples/web; pnpm dev
+
 .PHONY: binding-swift-test
 binding-swift-test:
 	swift test
