@@ -35,6 +35,14 @@ clean:
 rules-lint: $(PYTHON_VENV_DIR)
 	uv run scripts/lint_rules.py ./rules
 
+.PHONY: rules-format
+rules-format: $(PYTHON_VENV_DIR)
+	uv run scripts/format_rules.py ./rules
+
+.PHONY: rules-format-check
+rules-format-check: $(PYTHON_VENV_DIR)
+	uv run scripts/format_rules.py ./rules --check
+
 .PHONY: rules-build
 rules-build: $(RULES_DATA)
 

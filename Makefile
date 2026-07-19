@@ -8,6 +8,10 @@ test: core-lint-rules core-test binding-js-test binding-swift-test
 core-rules:
 	cd core; make rules-data
 
+.PHONY: core-format-rules
+core-format-rules:
+	cd core; make rules-format
+
 .PHONY: core-rules
 core-lint-rules:
 	cd core; make rules-lint
