@@ -4,14 +4,14 @@ description: The reader has seen this a hundred times. Use a concrete image i
 weight: 100
 ---
 
-tip of the iceberg
 at the end of the day
+double-edged sword
+elephant in the room
+game changer
 low-hanging fruit
 move the needle
-think outside the box
 paradigm shift
-elephant in the room
-silver bullet
 perfect storm
-double-edged sword
-game changer
+silver bullet
+think outside the box
+tip of the iceberg

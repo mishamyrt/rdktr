@@ -4,15 +4,15 @@ description: Pushy sales language repels readers. Show the value with facts ins
 weight: 100
 ---
 
-limited time offer
-don['|’]?t miss out
+absolutely free
 act now
 buy now
+don['|’]?t miss out
 hurry up
-absolutely free
-no hidden fees
-unbeatable price[s]?
-revolutionary
-once-in-a-lifetime
+limited time offer
 must-have
+no hidden fees
+once-in-a-lifetime
+revolutionary
+unbeatable price[s]?
 you deserve it

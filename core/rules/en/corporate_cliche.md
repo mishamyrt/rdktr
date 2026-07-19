@@ -5,18 +5,18 @@ description: >
 weight: 100
 ---
 
-industry-leading
 best-in-class
-world-class
 cutting-edge
-state-of-the-art
-next-generation
 game-changing
-seamless
-robust
+industry-leading
 innovative
-team of professionals
-proven track record
-win-win
-synerg*
 leverag*
+next-generation
+proven track record
+robust
+seamless
+state-of-the-art
+synerg*
+team of professionals
+win-win
+world-class

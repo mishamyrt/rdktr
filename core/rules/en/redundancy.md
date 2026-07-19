@@ -6,13 +6,13 @@ weight: 100
 
 absolutely essential
 advance planning
+basic fundamentals
+close proximity
+completely eliminate
+each and every
 end result
 final outcome
-past history
-future plans
 free gift
-close proximity
-each and every
-basic fundamentals
-completely eliminate
+future plans
+past history
 unexpected surprise

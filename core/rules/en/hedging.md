@@ -4,15 +4,15 @@ description: Vague qualifiers weaken the claim. Be specific or drop them.
 weight: 50
 ---
 
-somewhat
+a number of
 arguably
-possibly
-seemingly
-sort of
+fairly
 kind of
 more or less
-a number of
-fairly
+possibly
 relatively
-tends to
+seemingly
 seems to
+somewhat
+sort of
+tends to

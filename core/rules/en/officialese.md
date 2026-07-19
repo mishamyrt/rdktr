@@ -4,19 +4,19 @@ description: Sounds bureaucratic. Say it plainly.
 weight: 100
 ---
 
-in order to
-due to the fact that
+aforementioned
 at this point in time
+due to the fact that
+facilitat*
 for the purpose of
-in the event that
-[with|in] regard to
+herein
+in accordance with
+in order to
 in terms of
+in the event that
+on a daily basis
 prior to
 subsequent to
-in accordance with
-on a daily basis
-aforementioned
-herein
 thereof
 utiliz*
-facilitat*
+[with|in] regard to

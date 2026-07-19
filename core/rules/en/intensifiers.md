@@ -4,15 +4,15 @@ description: Intensifiers rarely add meaning. Cut them or replace the claim wi
 weight: 50
 ---
 
-very
-really
-extremely
-incredibly
-truly
-totally
-completely
 absolutely
+completely
+extremely
 highly
+incredibly
 insanely
+really
 super
+totally
+truly
 utterly
+very
