@@ -1,0 +1,69 @@
+name: Pages
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+env:
+  PNPM_VERSION: 11.6.0
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Build JS binding
+        run: make binding-js-build
+
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: examples/web
+
+      - name: Build web
+        run: pnpm build
+        working-directory: examples/web
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: examples/web/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
