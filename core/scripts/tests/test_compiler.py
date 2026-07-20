@@ -160,6 +160,17 @@ def test_punct_run_exact_and_range(tmp_path: Path) -> None:
     assert comp.pattern_keys[1] == ((ELEM_PUNCT_RUN, ord("?"), 2 | (5 << 8)),)
 
 
+def test_bare_question_mark_is_literal_punct(tmp_path: Path) -> None:
+    comp = compile_lines(["?", "гвоздь ?(2+)"], tmp_path)
+    assert comp.pattern_keys[0] == ((ELEM_PUNCT, ord("?"), 0),)
+    assert comp.pattern_keys[1][1] == (ELEM_PUNCT_RUN, ord("?"), 2)
+
+
+def test_question_mark_glued_to_word_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(RuleError, match="right after '\\]' or standalone"):
+        compile_lines(["гвоздь?"], tmp_path)
+
+
 def test_punct_run_of_one_degrades_to_punct(tmp_path: Path) -> None:
     comp = compile_lines(["гвоздь !(1)"], tmp_path)
     (key,) = comp.pattern_keys

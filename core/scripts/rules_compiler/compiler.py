@@ -38,9 +38,11 @@ STANDALONE_STAR_RE = re.compile(r"(^|\s)\*(\s|$|,)")
 GAP_RE = re.compile(r"^_(?:\((\d+)(?:-(\d+))?\))?$")
 # A standalone punctuation token: one bare char (that is not a syntax
 # metacharacter) or any backslash-escaped char, plus an optional repeat
-# count in the gap style: !(2), !(2-5), !(2+).
+# count in the gap style: !(2), !(2-5), !(2+). A bare '?' is only a
+# metacharacter right after ']' (inside a token); standalone it is a
+# literal question mark.
 PUNCT_TOKEN_RE = re.compile(
-    r"^(?:\\(?P<esc>[^\w\s])|(?P<bare>[^\w\s~*\[\]|?_()\\]))"
+    r"^(?:\\(?P<esc>[^\w\s])|(?P<bare>[^\w\s~*\[\]|_()\\]))"
     r"(?:\((?P<lo>\d+)(?:-(?P<hi>\d+))?(?P<plus>\+)?\))?$"
 )
 
@@ -249,7 +251,11 @@ class Compiler:
         alts: Slot = []
         for s in expand_brackets(tok, ctx):
             if "?" in s:
-                raise RuleError(ctx, f"'?' is only valid right after ']': {tok!r}")
+                raise RuleError(
+                    ctx,
+                    "'?' is only valid right after ']' or standalone"
+                    f" as a literal question mark: {tok!r}",
+                )
             if s == "":
                 alts.append([])
                 continue

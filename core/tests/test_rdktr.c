@@ -306,7 +306,7 @@ static void test_api_contract(void) {
 
     /* rule metadata is reachable through global ids */
     uint32_t rules = rdktr_multi_rule_count(M);
-    CHECK(rules == 41, "41 embedded rules, got %u", rules);
+    CHECK(rules == 42, "42 embedded rules, got %u", rules);
     for (uint32_t i = 0; i < rules; i++) {
         CHECK(rdktr_multi_rule_title(M, i) != NULL, "title %u", i);
         CHECK(rdktr_multi_rule_lang(M, i) != NULL, "lang %u", i);
