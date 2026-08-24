@@ -57,6 +57,38 @@ jobs:
       - name: Test
         run: make binding-js-test
 
+  web:
+    name: Web example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.6.0
+
+      - name: Build JS binding
+        run: make binding-js-build
+
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: examples/web
+
+      # tsc + vite build: keeps a type error out of master, where it would
+      # otherwise only surface in the Pages deploy
+      - name: Typecheck and build web
+        run: pnpm build
+        working-directory: examples/web
+
   binding-swift:
     name: Swift binding
     runs-on: macos-latest
