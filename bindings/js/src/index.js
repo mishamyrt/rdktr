@@ -205,7 +205,10 @@ function utf16Offsets(raw, count, text) {
     utf16Pos = 0,
     next = 0;
   for (const ch of text) {
-    while (next < sorted.length && sorted[next] === bytePos) {
+    // `<=`, not `===`: an offset that does not land on a codepoint boundary
+    // would otherwise block the cursor forever and drag every later offset
+    // with it. Such an offset rounds down to the boundary it falls inside.
+    while (next < sorted.length && sorted[next] <= bytePos) {
       toUtf16.set(sorted[next++], utf16Pos);
     }
     const cp = /** @type {number} */ (ch.codePointAt(0));

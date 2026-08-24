@@ -6,6 +6,9 @@
         "url": "https://github.com/mishamyrt/rdktr"
     },
     "type": "module",
+    "engines": {
+        "node": ">=22.19.0"
+    },
     "main": "src/index.js",
     "types": "src/index.d.ts",
     "exports": {

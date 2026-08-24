@@ -3,10 +3,17 @@ import { exec } from 'child_process';
 import { mkdir, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname, join, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// `import.meta.main` only exists on Node >= 22.19/24.2; without this fallback
+// an older Node exits 0 having built nothing.
+const isMain =
+  import.meta.main ??
+  (process.argv[1] !== undefined &&
+    import.meta.url === pathToFileURL(process.argv[1]).href);
 
 export const CORE_DIR = resolve(__dirname, '../../../core');
 export const CORE_SRC_DIR = join(CORE_DIR, 'src');
@@ -27,7 +34,7 @@ const CORE_EXPORT_SYMBOLS = [
   'free',
 ]
 
-if (import.meta.main) {
+if (isMain) {
   if (process.argv.length < 3) {
     console.error('Usage: node build.js <target>');
     process.exit(1);
@@ -131,7 +138,12 @@ async function zigWasm(options) {
     `-o "${options.outputFile}"`,
   ].flat();
 
-  await sh(`zig cc ${flags.join(' ')} -o "${options.outputFile}"`);
+  const { stderr } = await sh(`zig cc ${flags.join(' ')}`);
+  // compiler warnings go to stderr on a successful build; surface them
+  // without failing
+  if (stderr.trim()) {
+    process.stderr.write(stderr);
+  }
 }
 
 /**
@@ -141,8 +153,8 @@ async function zigWasm(options) {
  * @returns {Promise<number>}
  */
 async function gzipFileSize(file) {
-  const gzip = await sh(`gzip -c "${file}" | wc -c`);
-  return parseInt(gzip.trim());
+  const { stdout } = await sh(`gzip -c "${file}" | wc -c`);
+  return parseInt(stdout.trim());
 }
 
 /**
@@ -162,23 +174,22 @@ function humanizeSize(size) {
 }
 
 /**
- * Async runs a shell command and returns the output.
+ * Async runs a shell command and returns its output.
+ *
+ * Only a non-zero exit code is a failure: compilers write warnings to stderr
+ * on successful builds, so stderr alone must not reject.
  *
  * @param {string} cmd
- * @returns {Promise<string>}
+ * @returns {Promise<{ stdout: string, stderr: string }>}
  */
 function sh(cmd) {
     return new Promise((resolve, reject) => {
-        exec(cmd, (error, stdout, stderr) => {
+        exec(cmd, { maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
             if (error) {
-                reject(error);
+                reject(new Error(`${cmd} failed: ${error.message}\n${stderr}`, { cause: error }));
                 return;
             }
-            if (stderr) {
-                reject(stderr);
-                return;
-            }
-            resolve(stdout);
+            resolve({ stdout, stderr });
         });
     });
 }
