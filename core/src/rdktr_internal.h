@@ -9,8 +9,9 @@
 #define RDKTR_NONE 0xFFFFFFFFu
 #define RDKTR_NONE16 0xFFFFu
 
-/* Blob layout: fixed 128-byte header (little-endian u32 fields) followed by
- * 4-byte aligned sections. Data arrays are u16 except the rules table.
+/* Blob layout: fixed 136-byte header (a 4-byte magic, 32 little-endian u32
+ * fields, and a 4-byte language code) followed by 4-byte aligned sections.
+ * Data arrays are u16 except the rules table.
  * Produced by scripts/compile_rules.py. */
 #define RDKTR_HEADER_SIZE 136
 #define RDKTR_VERSION 5

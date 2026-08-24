@@ -86,6 +86,7 @@ class Compiler:
         self.lexeme_sets: list[tuple[int, ...]] = []  # lexeme_id -> word ids
         self.comma_rule_id = NONE
         self.comma_threshold = 0
+        self.comma_rule_ctx = ""  # where the comma rule was defined
         self.form_count = 0
         self.stats: dict[str, int] = {}
 
@@ -343,7 +344,7 @@ class Compiler:
         try:
             weight = int(meta.get("weight", "0"))
         except ValueError:
-            raise RuleError(str(path), "weight must be an integer")
+            raise RuleError(str(path), "weight must be an integer") from None
         rule_id = len(self.rules)
         self.rules.append(
             {"title": title, "description": description, "weight": weight}
@@ -353,8 +354,17 @@ class Compiler:
             ctx = f"{path}:{n}"
             line, _ = split_lint_ignore(raw, ctx)
             if COMMA_RULE_RE.match(line):
+                # the blob holds exactly one comma rule, so a second one
+                # would silently replace the first
+                if self.comma_rule_id != NONE:
+                    raise RuleError(
+                        ctx,
+                        "duplicate comma rule (already defined at"
+                        f" {self.comma_rule_ctx})",
+                    )
                 self.comma_rule_id = rule_id
                 self.comma_threshold = line.count(",")
+                self.comma_rule_ctx = ctx
                 continue
             for seq in self.iter_line_sequences(line, ctx):
                 key: list[tuple[int, int, int]] = []

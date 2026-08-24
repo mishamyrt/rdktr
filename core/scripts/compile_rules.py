@@ -30,7 +30,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--rules", default=str(root / "rules"),
                     help="directory with per-language subdirectories")
-    ap.add_argument("--out-c", default=str(root / "core" / "src" / "rules_data.c"))
+    ap.add_argument("--out-c", default=str(root / "src" / "rules_data.c"))
     ap.add_argument("--out-bin-dir", default=None,
                     help="optionally also write rules_<lang>.bin files here")
     args = ap.parse_args()

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Plugin } from "vite";
 
@@ -54,7 +54,10 @@ self.addEventListener("fetch", (event) => {
                     caches.open(CACHE).then((cache) => cache.put(SHELL, copy));
                     return res;
                 })
-                .catch(() => caches.match(SHELL))
+                // caches.match resolves to undefined when the shell is missing
+                // (a partially failed install, or an evicted cache), and
+                // respondWith(undefined) throws — hand back a real Response.
+                .catch(() => caches.match(SHELL).then((cached) => cached || Response.error()))
         );
         return;
     }
@@ -102,18 +105,32 @@ export function serviceWorker(): Plugin {
             publicDir = config.publicDir;
         },
         generateBundle(_options, bundle) {
+            // The cache name must change whenever any precached file changes,
+            // so it hashes contents, not just names: index.html and public/
+            // assets carry no content hash in their URL, and a name-only key
+            // would leave the activate handler serving them stale forever.
             const urls = new Set<string>();
+            const hash = createHash("sha256");
             urls.add(base + "index.html");
-            for (const fileName of Object.keys(bundle)) {
+            for (const fileName of Object.keys(bundle).sort()) {
                 if (fileName === "sw.js") continue;
                 urls.add(base + fileName);
+                const output = bundle[fileName];
+                hash.update(fileName).update("\0");
+                hash.update(output.type === "chunk" ? output.code : output.source);
+                hash.update("\0");
             }
             if (publicDir) {
-                for (const file of listFiles(publicDir)) urls.add(base + file);
+                for (const file of listFiles(publicDir).sort()) {
+                    urls.add(base + file);
+                    hash.update(file).update("\0");
+                    hash.update(readFileSync(join(publicDir, file)));
+                    hash.update("\0");
+                }
             }
 
             const precache = [...urls].sort();
-            const cache = "rdktr-" + createHash("sha256").update(precache.join("\n")).digest("hex").slice(0, 12);
+            const cache = "rdktr-" + hash.digest("hex").slice(0, 12);
 
             this.emitFile({
                 type: "asset",

@@ -69,6 +69,11 @@ rdktr_engine *rdktr_create(const void *blob_ptr, size_t size) {
     if (e.strpool_size == 0) return NULL;
     if (blob[strpool_off + e.strpool_size - 1] != '\0') return NULL;
     if (e.dat_size == 0) return NULL;
+    /* dat_check is u16 with 0xFFFF reserved as "free slot"; a larger trie
+     * would let a node index alias that sentinel and the walk in engine.c
+     * would descend into an unoccupied slot. The compiler enforces the same
+     * bound (U16_MAX_ID in scripts/rules_compiler/serialize.py). */
+    if (e.dat_size > RDKTR_NONE16) return NULL;
     if (!section_ok(total_size, dat_base_off, (uint64_t)e.dat_size * 2)) return NULL;
     if (!section_ok(total_size, dat_check_off, (uint64_t)e.dat_size * 2)) return NULL;
     if (!section_ok(total_size, dat_word_id_off, (uint64_t)e.dat_size * 2)) return NULL;

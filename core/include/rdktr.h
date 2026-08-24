@@ -62,8 +62,13 @@ typedef struct rdktr_multi rdktr_multi;
  * paragraphs (by '\n'); each paragraph is checked by exactly one engine —
  * the one whose script (Cyrillic/Latin) dominates the paragraph. Paragraphs
  * without a clear winner fall back to the dominant script of the whole
- * document. Rule ids in matches are global: engines are numbered in creation
- * order and each engine's rules follow the previous engine's rules. */
+ * document; when that ties too, every engine checks the paragraph and the
+ * results are merged. Rule ids in matches are global: engines are numbered
+ * in creation order and each engine's rules follow the previous engine's
+ * rules.
+ * Because dispatch is by script, no two blobs may share one script (two
+ * Latin rule sets, say): such a set would never be selected, so the call
+ * returns NULL instead. Also returns NULL if any blob is malformed. */
 rdktr_multi *rdktr_multi_create(const void *const *blobs, const size_t *sizes,
                                 size_t count);
 

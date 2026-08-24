@@ -223,6 +223,62 @@ static void test_language_detection(void) {
            "Личное местоимение");
 }
 
+/* An exact Cyrillic/Latin tie used to leave the paragraph unchecked: with no
+ * dominant script anywhere, no engine was selected and the text silently
+ * produced zero matches. Every engine runs instead, results merged. */
+static void test_script_tie(void) {
+    EXPECT_TOTAL("очень nice", 1);  /* cyr 5 > lat 4: ru wins outright */
+    EXPECT("очень nicey", 0, "очень", "Усилители"); /* cyr 5 == lat 5 */
+
+    /* both sides have findings; the merged list stays sorted by start */
+    const char *tie = "очень very a"; /* cyr 5 == lat 4 + 1 */
+    rdktr_match m[MAX_MATCHES];
+    size_t n = rdktr_multi_check(M, tie, strlen(tie), m, MAX_MATCHES);
+    CHECK(n == 2, "want 2 matches on a tie, got %zu", n);
+    if (n == 2) {
+        CHECK(m[0].start <= m[1].start, "merged matches sorted by start");
+        CHECK(strcmp(rdktr_multi_rule_lang(M, m[0].rule_id), "ru") == 0, "ru");
+        CHECK(strcmp(rdktr_multi_rule_lang(M, m[1].rule_id), "en") == 0, "en");
+    }
+    /* counting pass and filling pass must agree (the bindings rely on it) */
+    CHECK(rdktr_multi_check(M, tie, strlen(tie), NULL, 0) == n,
+          "count-only pass matches the filled pass");
+}
+
+/* Dispatch is by script, so two rule sets sharing one script would leave the
+ * second permanently unreachable — creation must refuse it. */
+static void test_duplicate_script_rejected(void) {
+    const void *blobs[2];
+    size_t sizes[2];
+    blobs[0] = blobs[1] = rdktr_embedded_rulesets[0].data;
+    sizes[0] = sizes[1] = rdktr_embedded_rulesets[0].size;
+    rdktr_multi *dup = rdktr_multi_create(blobs, sizes, 2);
+    CHECK(dup == NULL, "two rule sets of the same script must be rejected");
+    rdktr_multi_destroy(dup);
+}
+
+/* Case folding must cover every letter is_word_core() accepts, not just
+ * ASCII and Cyrillic, and must never change the byte length. */
+static void test_latin_case_folding(void) {
+    static const struct { const char *in, *want; } cases[] = {
+        {"Ärger", "ärger"},        /* Latin-1 Supplement  */
+        {"ÉCOLE", "école"},
+        {"ŁÓDŹ", "łódź"},          /* Latin Extended-A    */
+        {"ŸŻ", "ÿż"},              /* Ÿ -> ÿ crosses back into Latin-1 */
+        {"ОЧЕНЬ Ёж", "очень еж"},  /* unchanged Cyrillic behaviour */
+        {"\xD0", "\xD0"},          /* truncated sequence copied through */
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); i++) {
+        size_t len = strlen(cases[i].in);
+        uint8_t out[64];
+        rdktr_normalize_utf8((const uint8_t *)cases[i].in, out, len);
+        CHECK(strlen(cases[i].want) == len, "%s: folding changed byte length",
+              cases[i].in);
+        CHECK(memcmp(out, cases[i].want, len) == 0, "%s -> %.*s, want %s",
+              cases[i].in, (int)len, out, cases[i].want);
+    }
+}
+
 static void test_apostrophes(void) {
     /* rule is "don['|’]?t miss out": optional apostrophe variants */
     EXPECT("don't miss out", 0, "don't miss out", "Marketing hype");
@@ -334,6 +390,9 @@ int main(void) {
     test_exclamation_runs();
     test_parentheses();
     test_language_detection();
+    test_script_tie();
+    test_duplicate_script_rejected();
+    test_latin_case_folding();
     test_apostrophes();
     test_lexemes();
     test_blob_validation();
