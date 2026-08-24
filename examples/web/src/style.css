@@ -53,7 +53,7 @@
      height: 100vh;
  }
 
- .empty, .loading {
+ .empty, .loading, .error {
      color: var(--muted);
      font-size: 13px;
      padding: 22px 16px;
